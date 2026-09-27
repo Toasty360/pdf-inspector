@@ -35,8 +35,9 @@ version and date. Earlier releases are described in their
   their codes as they were read; a code the program leaves at `.notdef`
   has no glyph and reads as nothing.
 - The base-14 width fallback (a standard font without `/Widths`) measures
-  the codes of a font whose `/Differences` give only glyph names that do
-  not read (`/=`, `/;`), and that has no base encoding, as the single-byte
+  the codes of a font the decoder reads without an encoding, one whose
+  `/Differences` give only glyph names that do not read (`/=`, `/;`) and
+  that has neither a base encoding nor blank glyphs, as the single-byte
   characters those codes read as, rather than giving them no width.
 
 ## [1.25.0] - 2026-09-25
