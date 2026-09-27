@@ -33,12 +33,15 @@ version and date. Earlier releases are described in their
   A program whose encoding cannot be read, and a glyph name that does not
   read or reads as a private code point or a lone combining mark, leave
   their codes as they were read; a code the program leaves at `.notdef`
-  has no glyph and reads as nothing.
+  has no glyph and reads as nothing, except in a font where nothing else
+  reads (no name that reads, no base encoding, no blank glyphs), which
+  reads as before.
 - The base-14 width fallback (a standard font without `/Widths`) measures
   the codes of a font the decoder reads without an encoding, one whose
-  `/Differences` give only glyph names that do not read (`/=`, `/;`) and
-  that has neither a base encoding nor blank glyphs, as the single-byte
-  characters those codes read as, rather than giving them no width.
+  `/Differences` or embedded program give only glyph names that do not
+  read (`/=`, `/;`) and that has neither a base encoding nor blank glyphs,
+  as the single-byte characters those codes read as, rather than giving
+  them no width.
 
 ## [1.25.0] - 2026-09-25
 

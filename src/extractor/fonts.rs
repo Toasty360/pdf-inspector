@@ -440,7 +440,17 @@ fn base14_fallback_widths(
         let program = type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
         base = program.base;
         merge_program_readings(program.readings, &mut enc_map, &mut sequences);
-        named_codes.extend(program.absent);
+        // The codes the program leaves at `.notdef` read as nothing only in
+        // a font the decoder keeps an encoding for: a font nothing gives a
+        // reading keeps none, so they read as the single-byte characters
+        // they are, and are measured as those characters here.
+        if !enc_map.is_empty()
+            || !sequences.is_empty()
+            || base.is_some()
+            || !blank_glyph_codes(doc, font_dict, font_cache).is_empty()
+        {
+            named_codes.extend(program.absent);
+        }
     }
 
     let mut widths = HashMap::new();
@@ -1067,12 +1077,14 @@ fn reads_nothing_it_names(
 /// a letter set on its own, which read as a combining mark would join
 /// whatever character precedes them in the text rather than the letter
 /// under them). A code the array leaves at `.notdef` has no glyph, and
-/// reads as nothing, as a code the `/Differences` name but cannot read
-/// does. Nothing for a font whose `/Encoding` names a base or an encoding
-/// outright, for a program other than a Type 1 one, and for a program whose
-/// encoding cannot be read: such a font reads as before. What each program
-/// declares is kept in `font_cache`, so a font shared across pages is
-/// parsed once.
+/// reads as nothing, as a code the `/Differences` name but cannot read does,
+/// in a font that keeps an encoding: a font that nothing, its program
+/// included, gives a reading keeps none (`build_font_encodings`), so all its
+/// codes read as before. Nothing for a font whose `/Encoding` names a base
+/// or an encoding outright, for a program other than a Type 1 one, and for a
+/// program whose encoding cannot be read: such a font reads as before. What
+/// each program declares is kept in `font_cache`, so a font shared across
+/// pages is parsed once.
 fn type1_builtin_encoding(
     doc: &Document,
     font_dict: &lopdf::Dictionary,
@@ -3971,6 +3983,59 @@ mod tests {
         let widths =
             base14_fallback_widths(&doc, &based, &mut FontStyleCache::new()).expect("widths");
         assert_eq!(widths.widths.get(&0x3D), None);
+    }
+
+    #[test]
+    fn a_program_whose_names_read_nothing_leaves_its_notdef_codes_as_they_read() {
+        // A standard face without widths or `/Encoding` whose embedded Type 1
+        // program puts one name at 0x41 and leaves every other code at
+        // `.notdef`. A name nothing reads (a private code point) gives the
+        // font no encoding, so 0x42 reads as `B` and is measured as `B`; a
+        // name that reads gives it one, and 0x42 reads as nothing, with no
+        // width.
+        let face = |name: &str| {
+            let mut doc = Document::with_version("1.4");
+            let mut program = format!(
+                "%!PS-AdobeFont-1.0: Face 1.0\n11 dict begin\n/FontName /Face def\n\
+                 /FontType 1 def\n/Encoding 256 array\n\
+                 0 1 255 {{1 index exch /.notdef put}} for\ndup 65 /{name} put\n\
+                 readonly def\ncurrentdict end\ncurrentfile eexec\n"
+            )
+            .into_bytes();
+            program.extend_from_slice(&[0xd9, 0xd6, 0x6f, 0x63]);
+            let file = doc.add_object(lopdf::Stream::new(dictionary! {}, program));
+            let descriptor = doc.add_object(dictionary! {
+                "Type" => "FontDescriptor",
+                "FontName" => "Times-Roman",
+                "FontFile" => Object::Reference(file),
+            });
+            let font = dictionary! {
+                "Type" => "Font",
+                "Subtype" => "Type1",
+                "BaseFont" => "Times-Roman",
+                "FontDescriptor" => Object::Reference(descriptor),
+            };
+            (doc, font)
+        };
+        for (name, keeps_encoding) in [("uniE000", false), ("Alpha", true)] {
+            let (doc, font) = face(name);
+            let fonts = std::collections::BTreeMap::from([(b"F1".to_vec(), &font)]);
+            let (encodings, _) = build_font_encodings(
+                &doc,
+                &fonts,
+                &FontCMaps::from_doc(&doc),
+                &mut FontStyleCache::new(),
+            );
+            assert_eq!(encodings.contains_key("F1"), keeps_encoding, "{name}");
+            let widths =
+                base14_fallback_widths(&doc, &font, &mut FontStyleCache::new()).expect("widths");
+            let expected = if keeps_encoding {
+                None
+            } else {
+                crate::extractor::base14::base14_char_width("Times-Roman", 'B')
+            };
+            assert_eq!(widths.widths.get(&0x42).copied(), expected, "{name}");
+        }
     }
 
     #[test]
