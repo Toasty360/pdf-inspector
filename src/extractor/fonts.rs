@@ -2824,7 +2824,7 @@ pub(crate) fn extract_text_from_operand(
                     let mut decoded = match choice {
                         Some(CMapChoice::Primary) => primary,
                         Some(CMapChoice::Remapped) => remap,
-                        None => choose_best_cmap_decode(primary, remap),
+                        None => choose_best_cmap_decode(primary, remap, bytes.len() / 2),
                     };
                     if let Some(fb) = fallback {
                         let expected = bytes.len() / 2;
@@ -3256,23 +3256,81 @@ fn decode_symbol_fallback(bytes: &[u8], base_font_name: Option<&str>) -> Option<
     }
 }
 
-fn choose_best_cmap_decode<'a>(primary: CidDecode<'a>, remapped: CidDecode<'a>) -> CidDecode<'a> {
+/// The reading of one string, before the font's decision between its CMap
+/// and the repaired one is made (`CMapDecisionCache::consider`): the
+/// repaired CMap's when it reads the string clearly better. A string of one
+/// or two glyphs, shown as `glyphs` codes, is too short for its common words
+/// to be evidence: a wrong repair reads a glyph shown on its own as `a`
+/// where the CMap reads `m`, or a pair as `aT` (`at`) where it reads `re`,
+/// so such a string takes the repair only on evidence beyond short common
+/// words ([`evidence_beyond_short_words`]). Longer strings, and the font's
+/// decision over the text of its first strings, weigh every common word.
+fn choose_best_cmap_decode<'a>(
+    primary: CidDecode<'a>,
+    remapped: CidDecode<'a>,
+    glyphs: usize,
+) -> CidDecode<'a> {
     if primary.text.is_empty() {
         return remapped;
     }
     if remapped.text.is_empty() {
         return primary;
     }
-    let score_primary = score_text(&primary.text);
-    let score_remap = score_text(&remapped.text);
-    if score_remap > score_primary + 3 {
+    let score_primary = text_score(&primary.text);
+    let score_remap = text_score(&remapped.text);
+    let better = score_remap.total() > score_primary.total() + 3;
+    if better && (glyphs > 2 || evidence_beyond_short_words(&score_primary, &score_remap)) {
         remapped
     } else {
         primary
     }
 }
 
+/// Whether the repaired CMap's reading of a text (`repaired`) has evidence
+/// over the CMap's (`primary`) beyond short common words: better characters
+/// (letters and digits where the CMap reads replacement characters,
+/// controls or symbols; spaces count for neither, and letters outside ASCII
+/// and CJK count as symbols, as in the score), or more common words of
+/// three letters or more. The repair of a renumbered subset reading letters
+/// where its stale CMap misses codes or reads symbols has it.
+fn evidence_beyond_short_words(primary: &TextScore, repaired: &TextScore) -> bool {
+    repaired.letter_characters > primary.letter_characters
+        || repaired.long_words > primary.long_words
+}
+
 fn score_text(text: &str) -> i32 {
+    text_score(text).total()
+}
+
+/// What [`score_text`] counts in a text.
+struct TextScore {
+    /// Common words of one or two letters (`a`, `of`).
+    short_words: i32,
+    /// Common words of three letters or more (`the`).
+    long_words: i32,
+    letters: i32,
+    /// What the characters say: letters, spaces and digits for, other
+    /// characters and replacement characters against.
+    characters: i32,
+    /// The evidence [`evidence_beyond_short_words`] weighs: `characters`
+    /// without its spaces.
+    letter_characters: i32,
+}
+
+impl TextScore {
+    /// Ten points a common word, what the characters say, and a penalty
+    /// for a long text without any common word.
+    fn total(&self) -> i32 {
+        let words = self.short_words + self.long_words;
+        let mut total = words * 10 + self.characters;
+        if self.letters > 15 && words == 0 {
+            total -= 15;
+        }
+        total
+    }
+}
+
+fn text_score(text: &str) -> TextScore {
     const COMMON_WORDS: [&str; 22] = [
         "the", "and", "of", "to", "in", "a", "is", "that", "for", "with", "on", "as", "by", "from",
         "this", "be", "are", "at", "or", "not", "it", "our",
@@ -3282,7 +3340,17 @@ fn score_text(text: &str) -> i32 {
     let mut spaces = 0i32;
     let mut digits = 0i32;
     let mut other = 0i32;
-    let mut word_hits = 0i32;
+    let mut short_words = 0i32;
+    let mut long_words = 0i32;
+    let mut count_word = |word: &str| {
+        if COMMON_WORDS.contains(&word) {
+            if word.len() < 3 {
+                short_words += 1;
+            } else {
+                long_words += 1;
+            }
+        }
+    };
 
     let mut current = String::new();
     for ch in text.chars() {
@@ -3291,9 +3359,7 @@ fn score_text(text: &str) -> i32 {
             current.push(ch.to_ascii_lowercase());
         } else {
             if !current.is_empty() {
-                if COMMON_WORDS.iter().any(|w| *w == current) {
-                    word_hits += 1;
-                }
+                count_word(&current);
                 current.clear();
             }
             if ch == ' ' {
@@ -3314,15 +3380,17 @@ fn score_text(text: &str) -> i32 {
             }
         }
     }
-    if !current.is_empty() && COMMON_WORDS.iter().any(|w| *w == current) {
-        word_hits += 1;
+    if !current.is_empty() {
+        count_word(&current);
     }
 
-    let mut score = word_hits * 10 + letters + spaces * 2 + digits - other * 2;
-    if letters > 15 && word_hits == 0 {
-        score -= 15;
+    TextScore {
+        short_words,
+        long_words,
+        letters,
+        characters: letters + spaces * 2 + digits - other * 2,
+        letter_characters: letters + digits - other * 2,
     }
-    score
 }
 
 #[cfg(test)]
