@@ -1076,9 +1076,10 @@ fn reads_nothing_it_names(
 /// combining mark (the wide accents of TeX's math fonts, glyphs drawn over
 /// a letter set on its own, which read as a combining mark would join
 /// whatever character precedes them in the text rather than the letter
-/// under them). A code the array leaves at `.notdef` has no glyph, and
-/// reads as nothing, as a code the `/Differences` name but cannot read does,
-/// in a font that keeps an encoding: a font that nothing, its program
+/// under them). A code the array leaves at `.notdef`, but the word space
+/// (32, which PDF spaces words by whatever glyph it draws), has no glyph,
+/// and reads as nothing, as a code the `/Differences` name but cannot read
+/// does, in a font that keeps an encoding: a font that nothing, its program
 /// included, gives a reading keeps none (`build_font_encodings`), so all its
 /// codes read as before. Nothing for a font whose `/Encoding` names a base
 /// or an encoding outright, for a program other than a Type 1 one, and for a
@@ -1128,8 +1129,13 @@ fn type1_builtin_encoding(
                 .collect();
             let assigned: std::collections::HashSet<u8> =
                 names.iter().map(|(code, _)| *code).collect();
+            // Code 32 is the word space: PDF gives it the word spacing
+            // whatever glyph the font draws there, so a producer that shows
+            // it where the program has no glyph still means a space.
             let absent = (0..=u8::MAX)
-                .filter(|code| !assigned.contains(code) && !named_codes.contains(code))
+                .filter(|code| {
+                    *code != b' ' && !assigned.contains(code) && !named_codes.contains(code)
+                })
                 .collect();
             ProgramEncoding {
                 base: None,
@@ -1149,7 +1155,8 @@ struct ProgramEncoding {
     /// The reading of each code the program's encoding array names by a
     /// name that reads.
     readings: HashMap<u8, String>,
-    /// The codes the array leaves at `.notdef`: no glyph, read as nothing.
+    /// The codes the array leaves at `.notdef`, but the word space: no
+    /// glyph, read as nothing.
     absent: Vec<u8>,
 }
 

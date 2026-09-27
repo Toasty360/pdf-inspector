@@ -10339,9 +10339,10 @@ fn embedded_type1_lines(
 }
 
 /// Ligatures, curly quotes and a dash, as TeX's text faces show them, and
-/// the glyph whose name does not read, the old-style zero, the accents, and
-/// a code the program leaves at `.notdef` between two letters.
-const TEX_STRINGS: [&str; 9] = [
+/// the glyph whose name does not read, the old-style zero, the accents, a
+/// code the program leaves at `.notdef` between two letters, and the word
+/// space, which the program leaves at `.notdef` too.
+const TEX_STRINGS: [&str; 10] = [
     "\\014nd",
     "e\\013ect",
     "\\134quoted\\042",
@@ -10351,6 +10352,7 @@ const TEX_STRINGS: [&str; 9] = [
     "\\136",
     "\\176",
     "x\\041y",
+    "x y",
 ];
 
 #[test]
@@ -10361,7 +10363,8 @@ fn test_type1_font_without_an_encoding_reads_through_its_programs_encoding() {
     // reads, one it reads as a private code point and one it reads as a
     // lone combining mark leave their codes as they were read before; a
     // code the program leaves at `.notdef` has no glyph and reads as
-    // nothing.
+    // nothing, but the word space, which PDF spaces words by, still reads
+    // as a space.
     let lines = embedded_type1_lines(
         |doc| add_embedded_type1_font(doc, type1_program(&tex_text_encoding()), None, None),
         &TEX_STRINGS,
@@ -10377,7 +10380,8 @@ fn test_type1_font_without_an_encoding_reads_through_its_programs_encoding() {
             "01",
             "^",
             "~",
-            "xy"
+            "xy",
+            "x y"
         ]
     );
 }

@@ -32,10 +32,10 @@ version and date. Earlier releases are described in their
   the `/Differences` and a base encoding the font names still come first.
   A program whose encoding cannot be read, and a glyph name that does not
   read or reads as a private code point or a lone combining mark, leave
-  their codes as they were read; a code the program leaves at `.notdef`
-  has no glyph and reads as nothing, except in a font where nothing else
-  reads (no name that reads, no base encoding, no blank glyphs), which
-  reads as before.
+  their codes as they were read; a code the program leaves at `.notdef`,
+  other than the word space (code 32), has no glyph and reads as nothing,
+  except in a font where nothing else reads (no name that reads, no base
+  encoding, no blank glyphs), which reads as before.
 - The base-14 width fallback (a standard font without `/Widths`) measures
   the codes of a font the decoder reads without an encoding, one whose
   `/Differences` or embedded program give only glyph names that do not
