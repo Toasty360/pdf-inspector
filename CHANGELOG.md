@@ -32,7 +32,11 @@ version and date. Earlier releases are described in their
   the `/Differences` and a base encoding the font names still come first.
   A program whose encoding cannot be read, and a glyph name that does not
   read or reads as a private code point or a lone combining mark, leave
-  their codes as they were read.
+  their codes as they were read; a code the program leaves at `.notdef`
+  has no glyph and reads as nothing.
+- A standard font without `/Widths` whose `/Differences` name only glyphs
+  no name of theirs reads measures those codes as the single-byte
+  characters they read as, rather than giving them no width.
 
 ## [1.25.0] - 2026-09-25
 

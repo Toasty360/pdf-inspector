@@ -10339,8 +10339,9 @@ fn embedded_type1_lines(
 }
 
 /// Ligatures, curly quotes and a dash, as TeX's text faces show them, and
-/// the glyph whose name does not read, the old-style zero and the accents.
-const TEX_STRINGS: [&str; 8] = [
+/// the glyph whose name does not read, the old-style zero, the accents, and
+/// a code the program leaves at `.notdef` between two letters.
+const TEX_STRINGS: [&str; 9] = [
     "\\014nd",
     "e\\013ect",
     "\\134quoted\\042",
@@ -10349,6 +10350,7 @@ const TEX_STRINGS: [&str; 8] = [
     "\\0601",
     "\\136",
     "\\176",
+    "x\\041y",
 ];
 
 #[test]
@@ -10357,7 +10359,9 @@ fn test_type1_font_without_an_encoding_reads_through_its_programs_encoding() {
     // font's, so the codes below the space and the ones where TeX's layout
     // parts from ASCII read as the glyphs it names. A name no glyph list
     // reads, one it reads as a private code point and one it reads as a
-    // lone combining mark leave their codes as they were read before.
+    // lone combining mark leave their codes as they were read before; a
+    // code the program leaves at `.notdef` has no glyph and reads as
+    // nothing.
     let lines = embedded_type1_lines(
         |doc| add_embedded_type1_font(doc, type1_program(&tex_text_encoding()), None, None),
         &TEX_STRINGS,
@@ -10372,7 +10376,8 @@ fn test_type1_font_without_an_encoding_reads_through_its_programs_encoding() {
             "X",
             "01",
             "^",
-            "~"
+            "~",
+            "xy"
         ]
     );
 }

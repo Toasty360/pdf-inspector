@@ -424,11 +424,23 @@ fn base14_fallback_widths(
         merge_program_readings(by_index, &mut enc_map, &mut sequences);
     }
     // An embedded Type 1 program's own encoding, as the decoder reads it.
-    if base.is_none() && !reads_nothing_it_names(&named_codes, &enc_map, &sequences) {
-        let (program_base, readings) =
-            type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
-        base = program_base;
-        merge_program_readings(readings, &mut enc_map, &mut sequences);
+    // A font whose Differences read none of the codes they name, and that
+    // has no base encoding and no blank glyphs, gets no encoding from the
+    // decoder, so those codes read as the single-byte characters they are,
+    // and are measured as those characters here.
+    let reads_nothing = reads_nothing_it_names(&named_codes, &enc_map, &sequences);
+    let no_encoding =
+        reads_nothing && base.is_none() && blank_glyph_codes(doc, font_dict, font_cache).is_empty();
+    let mut named_codes = if no_encoding {
+        std::collections::HashSet::new()
+    } else {
+        named_codes
+    };
+    if base.is_none() && !reads_nothing {
+        let program = type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
+        base = program.base;
+        merge_program_readings(program.readings, &mut enc_map, &mut sequences);
+        named_codes.extend(program.absent);
     }
 
     let mut widths = HashMap::new();
@@ -957,10 +969,10 @@ pub(crate) fn build_font_encodings(
         // unless its Differences name only codes nothing here can read,
         // which keeps it without an encoding (below).
         if base.is_none() && !reads_nothing_it_names(&named_codes, &differences, &sequences) {
-            let (program_base, readings) =
-                type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
-            base = program_base;
-            merge_program_readings(readings, &mut differences, &mut sequences);
+            let program = type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
+            base = program.base;
+            merge_program_readings(program.readings, &mut differences, &mut sequences);
+            named_codes.extend(program.absent);
         }
         let named = named_encoding(doc, font_dict).and_then(|name| BaseEncoding::from_name(&name));
         let blank_codes = blank_glyph_codes(doc, font_dict, font_cache);
@@ -1054,19 +1066,21 @@ fn reads_nothing_it_names(
 /// combining mark (the wide accents of TeX's math fonts, glyphs drawn over
 /// a letter set on its own, which read as a combining mark would join
 /// whatever character precedes them in the text rather than the letter
-/// under them). Nothing for a font whose `/Encoding`
-/// names a base or an encoding outright, for a program other than a Type 1
-/// one, and for a program whose encoding cannot be read: such a font reads
-/// as before. What each program declares is kept in `font_cache`, so a font
-/// shared across pages is parsed once.
+/// under them). A code the array leaves at `.notdef` has no glyph, and
+/// reads as nothing, as a code the `/Differences` name but cannot read
+/// does. Nothing for a font whose `/Encoding` names a base or an encoding
+/// outright, for a program other than a Type 1 one, and for a program whose
+/// encoding cannot be read: such a font reads as before. What each program
+/// declares is kept in `font_cache`, so a font shared across pages is
+/// parsed once.
 fn type1_builtin_encoding(
     doc: &Document,
     font_dict: &lopdf::Dictionary,
     named_codes: &std::collections::HashSet<u8>,
     font_cache: &mut FontStyleCache,
-) -> (Option<BaseEncoding>, HashMap<u8, String>) {
+) -> ProgramEncoding {
     let Some(ff_ref) = type1_program_under_no_named_base(doc, font_dict) else {
-        return (None, HashMap::new());
+        return ProgramEncoding::default();
     };
     let builtin = font_cache
         .builtin_encodings_by_font_file
@@ -1075,8 +1089,11 @@ fn type1_builtin_encoding(
             font_file_data(doc, ff_ref).and_then(|data| super::type1::builtin_encoding(&data))
         });
     match builtin {
-        None => (None, HashMap::new()),
-        Some(BuiltinEncoding::Standard) => (Some(BaseEncoding::Standard), HashMap::new()),
+        None => ProgramEncoding::default(),
+        Some(BuiltinEncoding::Standard) => ProgramEncoding {
+            base: Some(BaseEncoding::Standard),
+            ..ProgramEncoding::default()
+        },
         Some(BuiltinEncoding::Custom(names)) => {
             let base_font_name = font_dict
                 .get(b"BaseFont")
@@ -1097,9 +1114,31 @@ fn type1_builtin_encoding(
                     reads.then_some((*code, text))
                 })
                 .collect();
-            (None, readings)
+            let assigned: std::collections::HashSet<u8> =
+                names.iter().map(|(code, _)| *code).collect();
+            let absent = (0..=u8::MAX)
+                .filter(|code| !assigned.contains(code) && !named_codes.contains(code))
+                .collect();
+            ProgramEncoding {
+                base: None,
+                readings,
+                absent,
+            }
         }
     }
+}
+
+/// What the encoding of an embedded Type 1 program gives a font whose
+/// `/Encoding` names no base (see [`type1_builtin_encoding`]).
+#[derive(Default)]
+struct ProgramEncoding {
+    /// `StandardEncoding`, for a program that declares it.
+    base: Option<BaseEncoding>,
+    /// The reading of each code the program's encoding array names by a
+    /// name that reads.
+    readings: HashMap<u8, String>,
+    /// The codes the array leaves at `.notdef`: no glyph, read as nothing.
+    absent: Vec<u8>,
 }
 
 /// The embedded program (`/FontFile`) of a Type 1 font whose `/Encoding`
@@ -3884,6 +3923,54 @@ mod tests {
         .expect("text decoded");
         // "ft", a space, "ffi", "a"; the unreadable `f_zzz` code reads as nothing.
         assert_eq!(text, "ft ffia");
+    }
+
+    #[test]
+    fn codes_differences_name_but_do_not_read_are_measured_as_they_read() {
+        // `[0x3D /= 0x3B /;]` on a standard face without widths: the font
+        // gets no encoding, so the codes read as `=` and `;`, and the width
+        // fallback measures them as those characters.
+        let doc = Document::new();
+        let font = lopdf::dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Times-Roman",
+            "Encoding" => Object::Dictionary(lopdf::dictionary! {
+                "Type" => "Encoding",
+                "Differences" => Object::Array(vec![
+                    Object::Integer(0x3D),
+                    Object::Name(b"=".to_vec()),
+                    Object::Integer(0x3B),
+                    Object::Name(b";".to_vec()),
+                ])
+            })
+        };
+        let widths =
+            base14_fallback_widths(&doc, &font, &mut FontStyleCache::new()).expect("widths");
+        for (code, ch) in [(0x3D_u16, '='), (0x3B, ';')] {
+            assert_eq!(
+                widths.widths.get(&code).copied(),
+                crate::extractor::base14::base14_char_width("Times-Roman", ch),
+                "{ch}"
+            );
+        }
+        // With a base encoding the font keeps an encoding, the codes the
+        // Differences name read as nothing, and they have no width either.
+        let mut based = font.clone();
+        based.set(
+            "Encoding",
+            Object::Dictionary(lopdf::dictionary! {
+                "Type" => "Encoding",
+                "BaseEncoding" => "WinAnsiEncoding",
+                "Differences" => Object::Array(vec![
+                    Object::Integer(0x3D),
+                    Object::Name(b"=".to_vec()),
+                ])
+            }),
+        );
+        let widths =
+            base14_fallback_widths(&doc, &based, &mut FontStyleCache::new()).expect("widths");
+        assert_eq!(widths.widths.get(&0x3D), None);
     }
 
     #[test]

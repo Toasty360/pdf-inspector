@@ -14,7 +14,8 @@ pub(crate) enum BuiltinEncoding {
 
 /// The built-in encoding of the Type 1 program `program` (the decompressed
 /// bytes of a `/FontFile` stream): the `/Encoding` entry of the font
-/// dictionary in its cleartext part, the text before `eexec`. The entry is
+/// dictionary in its cleartext part, the text before `eexec`, at the level
+/// of that dictionary rather than in one nested in it. The entry is
 /// read in the two forms programs write it: `/Encoding StandardEncoding
 /// def`, and `/Encoding 256 array` followed by an optional loop filling
 /// every code with `.notdef` and by `dup <code> /<name> put` statements, up
@@ -25,7 +26,17 @@ pub(crate) fn builtin_encoding(program: &[u8]) -> Option<BuiltinEncoding> {
     let mut tokens = Tokens {
         rest: cleartext(program)?,
     };
-    while tokens.next()? != Token::Name(b"Encoding") {}
+    // The font dictionary's own entry: at the level of the dictionary the
+    // program begins, not in one nested in it (`/FontInfo … begin … end`).
+    let mut depth = 0i32;
+    loop {
+        match tokens.next()? {
+            Token::Word(b"begin") | Token::Open(b'<') => depth += 1,
+            Token::Word(b"end") | Token::Close(b'>') => depth -= 1,
+            Token::Name(b"Encoding") if depth == 1 => break,
+            _ => {}
+        }
+    }
     match tokens.next()? {
         Token::Word(b"StandardEncoding") => {
             return ends_definition(&mut tokens).then_some(BuiltinEncoding::Standard);
@@ -339,6 +350,15 @@ mod tests {
             .to_vec();
         body.extend_from_slice(&program("/Encoding 256 array dup 12 /fi put readonly def"));
         assert_eq!(builtin_encoding(&body), custom(&[(12, "fi")]));
+    }
+
+    #[test]
+    fn an_encoding_key_in_a_nested_dictionary_is_not_the_fonts() {
+        let body = b"%!PS-AdobeFont-1.0: TestFace\n11 dict begin\n\
+            /FontInfo 7 dict dup begin\n/Encoding (a note, not the font's) readonly def\n\
+            end readonly def\n/Encoding 256 array dup 12 /fi put readonly def\n\
+            currentdict end\ncurrentfile eexec\n";
+        assert_eq!(builtin_encoding(body), custom(&[(12, "fi")]));
     }
 
     #[test]
