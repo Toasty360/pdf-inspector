@@ -34,9 +34,10 @@ version and date. Earlier releases are described in their
   read or reads as a private code point or a lone combining mark, leave
   their codes as they were read; a code the program leaves at `.notdef`
   has no glyph and reads as nothing.
-- A standard font without `/Widths` whose `/Differences` name only glyphs
-  no name of theirs reads measures those codes as the single-byte
-  characters they read as, rather than giving them no width.
+- The base-14 width fallback (a standard font without `/Widths`) measures
+  the codes of a font whose `/Differences` give only glyph names that do
+  not read (`/=`, `/;`), and that has no base encoding, as the single-byte
+  characters those codes read as, rather than giving them no width.
 
 ## [1.25.0] - 2026-09-25
 
