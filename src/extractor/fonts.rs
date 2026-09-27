@@ -2826,6 +2826,11 @@ pub(crate) fn extract_text_from_operand(
                         Some(CMapChoice::Remapped) => remap,
                         None => choose_best_cmap_decode(primary, remap, bytes.len() / 2),
                     };
+                    // The program's own reading (the font's cmap) is no
+                    // reconstruction: a short common word it spells is what
+                    // its glyphs are, not chance, so it is weighed on every
+                    // common word whatever the string's length (unlike the
+                    // repaired CMap in `choose_best_cmap_decode`).
                     if let Some(fb) = fallback {
                         let expected = bytes.len() / 2;
                         let decoded_len = decoded.text.chars().count();
@@ -2840,6 +2845,7 @@ pub(crate) fn extract_text_from_operand(
                         return Some(decoded.joined(bytes));
                     }
                 } else if !primary.text.is_empty() {
+                    // The program's own reading, weighed as above.
                     if let Some(fb) = entry.fallback.as_ref().map(|c| CidDecode::new(c, bytes)) {
                         let expected = bytes.len() / 2;
                         let decoded_len = primary.text.chars().count();
@@ -3284,7 +3290,7 @@ fn choose_best_cmap_decode<'a>(
         if glyphs > 2 {
             score.total()
         } else {
-            score.total() - score.short_words * 10
+            score.total_without_short_words()
         }
     };
     if score(&remapped.text) > score(&primary.text) + 3 {
@@ -3311,15 +3317,25 @@ struct TextScore {
 }
 
 impl TextScore {
-    /// Ten points a common word, what the characters say, and a penalty
-    /// for a long text without any common word.
+    /// The points a common word counts.
+    const WORD_POINTS: i32 = 10;
+
+    /// [`Self::WORD_POINTS`] a common word, what the characters say, and a
+    /// penalty for a long text without any common word.
     fn total(&self) -> i32 {
         let words = self.short_words + self.long_words;
-        let mut total = words * 10 + self.characters;
+        let mut total = words * Self::WORD_POINTS + self.characters;
         if self.letters > 15 && words == 0 {
             total -= 15;
         }
         total
+    }
+
+    /// [`Self::total`] without the points of short common words, which a
+    /// string of one or two glyphs spells by chance as often as not (see
+    /// `choose_best_cmap_decode`).
+    fn total_without_short_words(&self) -> i32 {
+        self.total() - self.short_words * Self::WORD_POINTS
     }
 }
 
