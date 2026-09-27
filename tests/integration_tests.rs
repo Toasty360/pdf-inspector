@@ -10704,6 +10704,30 @@ fn test_cid_keyed_cmap_keeps_its_reading_where_a_repair_reads_a_short_common_wor
 }
 
 #[test]
+fn test_a_repair_reads_a_lone_glyph_the_cmap_reads_as_a_control() {
+    // A CMap that maps the CID of `m` to a control character, which reads as
+    // a replacement character, and a CIDToGIDMap that sends that CID to a
+    // glyph index the CMap maps to `m`: the lone glyph's letter over the
+    // CMap's replacement character is evidence, and the repair reads it.
+    let text = "Stakeholder engagement";
+    let cid = |ch: char| 0x0100 + ch as u16;
+    let mut entries: Vec<(u16, char)> = text
+        .chars()
+        .map(|ch| (cid(ch), if ch == 'm' { '\u{0001}' } else { ch }))
+        .collect();
+    entries.push((0x0300, 'm'));
+    entries.sort();
+    entries.dedup();
+    let mut gids: Vec<u16> = (0..=0x0300).collect();
+    gids[usize::from(cid('m'))] = 0x0300;
+    let lines = identity_h_lines(
+        |doc| add_identity_h_subset_font(doc, &entries, Some(&gids), cid_widths()),
+        &[glyph_strings(text, cid)],
+    );
+    assert_eq!(lines, [text]);
+}
+
+#[test]
 fn test_subset_fonts_whose_cmap_misses_their_codes_still_read_through_the_repair() {
     let text = [
         "The quick brown fox jumps over the lazy dog.",
@@ -10818,4 +10842,35 @@ fn test_renumbered_subset_collision_reads_short_common_words_of_longer_strings_t
         &lines,
     );
     assert_eq!(read, [line; 3]);
+}
+
+#[test]
+fn test_renumbered_subset_collision_keeps_the_stale_reading_of_short_words_before_the_font_choice()
+{
+    // The price of not trusting short words: in the colliding renumbered
+    // subset, a word of one or two letters shown as a string of its own is
+    // no evidence for the repair, so `of`, `to`, `in` and `is` keep the
+    // stale CMap's letters until the font's choice (never made here, on so
+    // few bytes).
+    let words = ["of", "to", "in", "is"];
+    let entries: Vec<(u16, char)> = ('a'..='z')
+        .map(|ch| (3 + (ch as u16 - 'a' as u16), ch))
+        .collect();
+    let code = |ch: char| 1 + (ch as u16 - 'a' as u16);
+    let lines: Vec<Vec<Vec<u16>>> = words
+        .iter()
+        .map(|word| vec![word.chars().map(code).collect()])
+        .collect();
+    let read = identity_h_lines(
+        |doc| {
+            add_identity_h_subset_font(
+                doc,
+                &entries,
+                None,
+                vec![0.into(), vec![lopdf::Object::Integer(500); 27].into()],
+            )
+        },
+        &lines,
+    );
+    assert_eq!(read, ["md", "rm", "gl", "gq"]);
 }

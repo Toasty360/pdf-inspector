@@ -3258,13 +3258,16 @@ fn decode_symbol_fallback(bytes: &[u8], base_font_name: Option<&str>) -> Option<
 
 /// The reading of one string, before the font's decision between its CMap
 /// and the repaired one is made (`CMapDecisionCache::consider`): the
-/// repaired CMap's when it reads the string clearly better. A string of one
-/// or two glyphs, shown as `glyphs` codes, is too short for its common words
-/// to be evidence: a wrong repair reads a glyph shown on its own as `a`
-/// where the CMap reads `m`, or a pair as `aT` (`at`) where it reads `re`,
-/// so such a string takes the repair only on evidence beyond short common
-/// words ([`evidence_beyond_short_words`]). Longer strings, and the font's
-/// decision over the text of its first strings, weigh every common word.
+/// repaired CMap's when it reads the string clearly better, by more than
+/// three points. A string of one or two glyphs, shown as `glyphs` codes, is
+/// too short for its short common words (one or two letters) to be
+/// evidence: a wrong repair reads a glyph shown on its own as `a` where the
+/// CMap reads `m`, `.` or a space, or a pair as `aT` (`at`) where it reads
+/// `re`. Such a string's readings are compared without the points of those
+/// words, so the repair must win on the rest: a letter where the CMap reads
+/// a replacement character or a control, two letters where it reads two
+/// symbols. Longer strings, and the font's decision over the text of its
+/// first strings, weigh every common word.
 fn choose_best_cmap_decode<'a>(
     primary: CidDecode<'a>,
     remapped: CidDecode<'a>,
@@ -3276,26 +3279,19 @@ fn choose_best_cmap_decode<'a>(
     if remapped.text.is_empty() {
         return primary;
     }
-    let score_primary = text_score(&primary.text);
-    let score_remap = text_score(&remapped.text);
-    let better = score_remap.total() > score_primary.total() + 3;
-    if better && (glyphs > 2 || evidence_beyond_short_words(&score_primary, &score_remap)) {
+    let score = |text: &str| {
+        let score = text_score(text);
+        if glyphs > 2 {
+            score.total()
+        } else {
+            score.total() - score.short_words * 10
+        }
+    };
+    if score(&remapped.text) > score(&primary.text) + 3 {
         remapped
     } else {
         primary
     }
-}
-
-/// Whether the repaired CMap's reading of a text (`repaired`) has evidence
-/// over the CMap's (`primary`) beyond short common words: better characters
-/// (letters and digits where the CMap reads replacement characters,
-/// controls or symbols; spaces count for neither, and letters outside ASCII
-/// and CJK count as symbols, as in the score), or more common words of
-/// three letters or more. The repair of a renumbered subset reading letters
-/// where its stale CMap misses codes or reads symbols has it.
-fn evidence_beyond_short_words(primary: &TextScore, repaired: &TextScore) -> bool {
-    repaired.letter_characters > primary.letter_characters
-        || repaired.long_words > primary.long_words
 }
 
 fn score_text(text: &str) -> i32 {
@@ -3312,9 +3308,6 @@ struct TextScore {
     /// What the characters say: letters, spaces and digits for, other
     /// characters and replacement characters against.
     characters: i32,
-    /// The evidence [`evidence_beyond_short_words`] weighs: `characters`
-    /// without its spaces.
-    letter_characters: i32,
 }
 
 impl TextScore {
@@ -3389,7 +3382,6 @@ fn text_score(text: &str) -> TextScore {
         long_words,
         letters,
         characters: letters + spaces * 2 + digits - other * 2,
-        letter_characters: letters + digits - other * 2,
     }
 }
 
