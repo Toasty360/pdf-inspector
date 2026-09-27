@@ -120,6 +120,12 @@ pub(crate) enum BaseEncoding {
 
 /// Explicit glyph encodings and narrowly verified repairs for a stale CMap.
 pub(crate) struct FontEncoding {
+    /// The character of each code the font's `/Differences` name by a name
+    /// that reads as one (through the embedded program for a numbered
+    /// name), and, beneath them, of each code the built-in encoding of an
+    /// embedded Type 1 program names, for a font whose `/Encoding` names no
+    /// base (see `fonts::type1_builtin_encoding`); a longer reading is in
+    /// `sequences`.
     pub(crate) differences: FontEncodingMap,
     /// Codes whose entry in a stale ToUnicode CMap describes the slot's
     /// original occupant rather than the glyph the font's `/Differences`

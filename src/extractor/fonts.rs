@@ -1,6 +1,7 @@
 //! Font width parsing, encoding, and text decoding.
 
 use super::get_number;
+use super::type1::BuiltinEncoding;
 use crate::glyph_names::glyph_name_to_string;
 use crate::tounicode::{CidDecodeStats, CodeMapping, FontCMaps};
 use crate::types::{
@@ -403,7 +404,7 @@ fn base14_fallback_widths(
     }
 
     let encoding = parse_font_encoding(doc, font_dict);
-    let base = encoding
+    let mut base = encoding
         .as_ref()
         .and_then(|r| r.base)
         .or_else(|| builtin_base_encoding(doc, font_dict));
@@ -421,6 +422,13 @@ fn base14_fallback_widths(
     if let Some(result) = &encoding {
         let by_index = glyph_index_chars(doc, font_dict, &result.gid_names, font_cache);
         merge_program_readings(by_index, &mut enc_map, &mut sequences);
+    }
+    // An embedded Type 1 program's own encoding, as the decoder reads it.
+    if base.is_none() {
+        let (program_base, readings) =
+            type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
+        base = program_base;
+        merge_program_readings(readings, &mut enc_map, &mut sequences);
     }
 
     let mut widths = HashMap::new();
@@ -944,6 +952,14 @@ pub(crate) fn build_font_encodings(
         if base.is_none() {
             base = builtin_base_encoding(doc, font_dict);
         }
+        // Another Type 1 font whose encoding names no base reads through
+        // the encoding of its embedded program, beneath its Differences.
+        if base.is_none() {
+            let (program_base, readings) =
+                type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
+            base = program_base;
+            merge_program_readings(readings, &mut differences, &mut sequences);
+        }
         let named = named_encoding(doc, font_dict).and_then(|name| BaseEncoding::from_name(&name));
         let blank_codes = blank_glyph_codes(doc, font_dict, font_cache);
         // A font whose Differences name only codes nothing here can read
@@ -1007,6 +1023,92 @@ fn builtin_base_encoding(doc: &Document, font_dict: &lopdf::Dictionary) -> Optio
         None => Some(builtin),
         Some(name) => (name == own_name).then_some(builtin),
     }
+}
+
+/// The base encoding a Type 1 font whose `/Encoding` names none reads
+/// through: the built-in encoding of its embedded program (PDF 32000-1:2008,
+/// Table 114). A font without an `/Encoding`, or with an encoding
+/// dictionary that has no `/BaseEncoding`, whose program declares
+/// `StandardEncoding` reads through that; one whose program declares an
+/// encoding array reads each code the array names as that glyph, where the
+/// name reads as text of its own — returned by code, except the codes of
+/// `named_codes`, which the font's own `/Differences` name. A name that
+/// does not read leaves its code as it was read before, and so does one
+/// that reads as a private code point (the glyph list gives old-style
+/// figures and small capitals such codes, where the program puts them at
+/// the codes of the digits and letters they stand for) or as a lone
+/// combining mark (the wide accents of TeX's math fonts, glyphs drawn over
+/// a letter set on its own, which read as a combining mark would join
+/// whatever character precedes them in the text rather than the letter
+/// under them). Nothing for a font whose `/Encoding`
+/// names a base or an encoding outright, for a program other than a Type 1
+/// one, and for a program whose encoding cannot be read: such a font reads
+/// as before. What each program declares is kept in `font_cache`, so a font
+/// shared across pages is parsed once.
+fn type1_builtin_encoding(
+    doc: &Document,
+    font_dict: &lopdf::Dictionary,
+    named_codes: &std::collections::HashSet<u8>,
+    font_cache: &mut FontStyleCache,
+) -> (Option<BaseEncoding>, HashMap<u8, String>) {
+    let Some(ff_ref) = type1_program_under_no_named_base(doc, font_dict) else {
+        return (None, HashMap::new());
+    };
+    let builtin = font_cache
+        .builtin_encodings_by_font_file
+        .entry(ff_ref)
+        .or_insert_with(|| {
+            font_file_data(doc, ff_ref).and_then(|data| super::type1::builtin_encoding(&data))
+        });
+    match builtin {
+        None => (None, HashMap::new()),
+        Some(BuiltinEncoding::Standard) => (Some(BaseEncoding::Standard), HashMap::new()),
+        Some(BuiltinEncoding::Custom(names)) => {
+            let base_font_name = font_dict
+                .get(b"BaseFont")
+                .ok()
+                .and_then(|o| o.as_name().ok())
+                .map(String::from_utf8_lossy);
+            let readings = names
+                .iter()
+                .filter(|(code, _)| !named_codes.contains(code))
+                .filter_map(|(code, name)| {
+                    let text = glyph_name_to_string(name).or_else(|| {
+                        private_glyph_to_char(name, base_font_name.as_deref()).map(String::from)
+                    })?;
+                    let private =
+                        |c: char| ('\u{E000}'..='\u{F8FF}').contains(&c) || c >= '\u{F0000}';
+                    let combining = |c: char| ('\u{0300}'..='\u{036F}').contains(&c);
+                    let reads = !text.chars().any(private) && !text.chars().all(combining);
+                    reads.then_some((*code, text))
+                })
+                .collect();
+            (None, readings)
+        }
+    }
+}
+
+/// The embedded program (`/FontFile`) of a Type 1 font whose `/Encoding`
+/// names no base encoding: absent, or a dictionary without `/BaseEncoding`.
+fn type1_program_under_no_named_base(
+    doc: &Document,
+    font_dict: &lopdf::Dictionary,
+) -> Option<ObjectId> {
+    let subtype = font_dict.get(b"Subtype").ok()?.as_name().ok()?;
+    if subtype != b"Type1" && subtype != b"MMType1" {
+        return None;
+    }
+    if let Ok(encoding) = font_dict.get(b"Encoding") {
+        let encoding = match encoding {
+            Object::Reference(id) => doc.get_object(*id).ok()?,
+            other => other,
+        };
+        if encoding.as_dict().ok()?.has(b"BaseEncoding") {
+            return None;
+        }
+    }
+    let descriptor = resolve_dict(doc, font_dict.get(b"FontDescriptor").ok()?)?;
+    descriptor.get(b"FontFile").ok()?.as_reference().ok()
 }
 
 /// The characters of the glyphs that `/Differences` names by number, read
@@ -1932,6 +2034,10 @@ pub(crate) struct FontStyleCache {
     /// program does not identify it, so a font shared across pages is
     /// parsed once.
     numbered_glyphs_by_font_file: HashMap<ObjectId, HashMap<String, Option<String>>>,
+    /// The built-in encoding each embedded Type 1 program declares (see
+    /// `type1_builtin_encoding`), `None` when it cannot be read, so a font
+    /// shared across pages is parsed once.
+    builtin_encodings_by_font_file: HashMap<ObjectId, Option<BuiltinEncoding>>,
 }
 
 impl FontStyleCache {

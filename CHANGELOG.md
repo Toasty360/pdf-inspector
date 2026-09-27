@@ -21,6 +21,18 @@ version and date. Earlier releases are described in their
   a Type1 font now judges a CMap declared this way too, and the page
   detector counts such a font's text byte by byte as well. Composite
   (Type0) fonts keep reading their codes as their CMap says.
+- A Type1 font whose `/Encoding` names no base encoding (none at all, or an
+  encoding dictionary without `/BaseEncoding`) reads through the built-in
+  encoding of its embedded program, the base PDF 32000-1:2008 (Table 114)
+  gives it. TeX's fonts carry their layout in the program and no
+  `/Encoding`, so the codes the standard encoding reads otherwise or not at
+  all lost their text: ligatures (`efficiency` read as `eciency`), curly
+  quotes and dashes (`{` for an en dash), and math symbols (`2` for `∈`,
+  `f` and `g` for braces, nothing for a minus sign). A ToUnicode CMap, the
+  `/Differences` and a base encoding the font names still come first. A
+  program whose encoding cannot be read, and a glyph name that does not
+  read or reads as a private code point or a lone combining mark, leave
+  their codes as they were read.
 
 ## [1.25.0] - 2026-09-25
 
