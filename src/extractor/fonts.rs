@@ -425,12 +425,15 @@ fn base14_fallback_widths(
     }
     // An embedded Type 1 program's own encoding, as the decoder reads it.
     let mut named_codes = named_codes;
-    if base.is_none() && !reads_nothing_it_names(&named_codes, &enc_map, &sequences) {
-        let program = type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
-        base = program.base;
-        merge_program_readings(program.readings, &mut enc_map, &mut sequences);
-        named_codes.extend(program.absent);
-    }
+    apply_program_encoding(
+        doc,
+        font_dict,
+        font_cache,
+        &mut base,
+        &mut enc_map,
+        &mut sequences,
+        &mut named_codes,
+    );
     // A font the decoder keeps no encoding for reads its codes as the
     // single-byte characters they are, those its Differences or its program
     // name included, and they are measured as those characters here.
@@ -965,12 +968,15 @@ pub(crate) fn build_font_encodings(
         // the encoding of its embedded program, beneath its Differences —
         // unless its Differences name only codes nothing here can read,
         // which keeps it without an encoding (below).
-        if base.is_none() && !reads_nothing_it_names(&named_codes, &differences, &sequences) {
-            let program = type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
-            base = program.base;
-            merge_program_readings(program.readings, &mut differences, &mut sequences);
-            named_codes.extend(program.absent);
-        }
+        apply_program_encoding(
+            doc,
+            font_dict,
+            font_cache,
+            &mut base,
+            &mut differences,
+            &mut sequences,
+            &mut named_codes,
+        );
         let named = named_encoding(doc, font_dict).and_then(|name| BaseEncoding::from_name(&name));
         let blank_codes = blank_glyph_codes(doc, font_dict, font_cache);
         // A font whose Differences name only codes nothing here can read
@@ -1029,6 +1035,32 @@ fn builtin_base_encoding(doc: &Document, font_dict: &lopdf::Dictionary) -> Optio
         None => Some(builtin),
         Some(name) => (name == own_name).then_some(builtin),
     }
+}
+
+/// The encoding a font's embedded Type 1 program gives it beneath its
+/// Differences, for a font whose encoding names no base (see
+/// [`type1_builtin_encoding`]): the program's base, its readings merged into
+/// `differences` and `sequences`, and the codes it leaves at `.notdef` added
+/// to `named_codes`. Nothing for a font with a base, or whose Differences
+/// name only codes nothing here can read, which keeps it without an
+/// encoding. The decoder and the base-14 width fallback both take this step,
+/// so a code's width is the advance of the glyph the text reads.
+fn apply_program_encoding(
+    doc: &Document,
+    font_dict: &lopdf::Dictionary,
+    font_cache: &mut FontStyleCache,
+    base: &mut Option<BaseEncoding>,
+    differences: &mut FontEncodingMap,
+    sequences: &mut HashMap<u8, String>,
+    named_codes: &mut std::collections::HashSet<u8>,
+) {
+    if base.is_some() || reads_nothing_it_names(named_codes, differences, sequences) {
+        return;
+    }
+    let program = type1_builtin_encoding(doc, font_dict, named_codes, font_cache);
+    *base = program.base;
+    merge_program_readings(program.readings, differences, sequences);
+    named_codes.extend(program.absent);
 }
 
 /// Whether the decoder keeps an encoding for a font (`build_font_encodings`):
