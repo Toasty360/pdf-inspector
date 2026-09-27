@@ -147,12 +147,18 @@ pub(crate) struct FontEncoding {
     /// entry is a control destination, where the standard decode reads the
     /// rest as before.
     pub(crate) named: Option<BaseEncoding>,
-    /// Every code the `/Differences` array names, mapped or not: a code
-    /// named there is that glyph, whatever the base encoding puts at it.
+    /// Every code the `/Differences` array names, mapped or not, and each
+    /// code other than the word space that the encoding array of an
+    /// embedded Type 1 program leaves at `.notdef`, for a font whose
+    /// `/Encoding` names no base (see `fonts::type1_builtin_encoding`): a
+    /// code named there is that glyph, whatever the base encoding puts at
+    /// it, and one that `differences` and `sequences` do not read reads as
+    /// nothing.
     pub(crate) named_codes: std::collections::HashSet<u8>,
-    /// Codes whose `/Differences` glyph stands for several characters: a
-    /// ligature named by its components (`f_t`, `f_f_i`) or by a `uni`
-    /// sequence, read as the letters it joins.
+    /// Codes whose glyph stands for several characters, named by the
+    /// `/Differences` or, beneath them, by the encoding array of an
+    /// embedded Type 1 program: a ligature named by its components (`f_t`,
+    /// `f_f_i`) or by a `uni` sequence, read as the letters it joins.
     pub(crate) sequences: HashMap<u8, String>,
 }
 

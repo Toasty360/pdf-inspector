@@ -424,33 +424,20 @@ fn base14_fallback_widths(
         merge_program_readings(by_index, &mut enc_map, &mut sequences);
     }
     // An embedded Type 1 program's own encoding, as the decoder reads it.
-    // A font whose Differences read none of the codes they name, and that
-    // has no base encoding and no blank glyphs, gets no encoding from the
-    // decoder, so those codes read as the single-byte characters they are,
-    // and are measured as those characters here.
-    let reads_nothing = reads_nothing_it_names(&named_codes, &enc_map, &sequences);
-    let no_encoding =
-        reads_nothing && base.is_none() && blank_glyph_codes(doc, font_dict, font_cache).is_empty();
-    let mut named_codes = if no_encoding {
-        std::collections::HashSet::new()
-    } else {
-        named_codes
-    };
-    if base.is_none() && !reads_nothing {
+    let mut named_codes = named_codes;
+    if base.is_none() && !reads_nothing_it_names(&named_codes, &enc_map, &sequences) {
         let program = type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
         base = program.base;
         merge_program_readings(program.readings, &mut enc_map, &mut sequences);
-        // The codes the program leaves at `.notdef` read as nothing only in
-        // a font the decoder keeps an encoding for: a font nothing gives a
-        // reading keeps none, so they read as the single-byte characters
-        // they are, and are measured as those characters here.
-        if !enc_map.is_empty()
-            || !sequences.is_empty()
-            || base.is_some()
-            || !blank_glyph_codes(doc, font_dict, font_cache).is_empty()
-        {
-            named_codes.extend(program.absent);
-        }
+        named_codes.extend(program.absent);
+    }
+    // A font the decoder keeps no encoding for reads its codes as the
+    // single-byte characters they are, those its Differences or its program
+    // name included, and they are measured as those characters here.
+    let blank_codes = blank_glyph_codes(doc, font_dict, font_cache);
+    let named = named_encoding(doc, font_dict).and_then(|name| BaseEncoding::from_name(&name));
+    if !keeps_encoding(&enc_map, &sequences, &blank_codes, base, named) {
+        named_codes.clear();
     }
 
     let mut widths = HashMap::new();
@@ -992,12 +979,7 @@ pub(crate) fn build_font_encodings(
         // tend to keep meaningful (a glyph named by the character itself,
         // `=` or `;`), where an encoding would read them as nothing. Only
         // a font some of whose names do read treats the rest as nothing.
-        if !differences.is_empty()
-            || !sequences.is_empty()
-            || !blank_codes.is_empty()
-            || base.is_some()
-            || named.is_some()
-        {
+        if keeps_encoding(&differences, &sequences, &blank_codes, base, named) {
             encodings.insert(
                 resource_name,
                 FontEncoding {
@@ -1047,6 +1029,25 @@ fn builtin_base_encoding(doc: &Document, font_dict: &lopdf::Dictionary) -> Optio
         None => Some(builtin),
         Some(name) => (name == own_name).then_some(builtin),
     }
+}
+
+/// Whether the decoder keeps an encoding for a font (`build_font_encodings`):
+/// one that reads some code through it — a reading of its Differences or of
+/// its embedded program, a blank glyph, or a base or named encoding. A font
+/// without one reads its codes as the single-byte characters they are, and
+/// the base-14 width fallback measures them as those characters.
+fn keeps_encoding(
+    differences: &FontEncodingMap,
+    sequences: &HashMap<u8, String>,
+    blank_codes: &std::collections::HashSet<u8>,
+    base: Option<BaseEncoding>,
+    named: Option<BaseEncoding>,
+) -> bool {
+    !differences.is_empty()
+        || !sequences.is_empty()
+        || !blank_codes.is_empty()
+        || base.is_some()
+        || named.is_some()
 }
 
 /// Whether a font's `/Differences` name codes and read none of them: such a
