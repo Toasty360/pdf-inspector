@@ -424,7 +424,7 @@ fn base14_fallback_widths(
         merge_program_readings(by_index, &mut enc_map, &mut sequences);
     }
     // An embedded Type 1 program's own encoding, as the decoder reads it.
-    if base.is_none() {
+    if base.is_none() && !reads_nothing_it_names(&named_codes, &enc_map, &sequences) {
         let (program_base, readings) =
             type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
         base = program_base;
@@ -953,8 +953,10 @@ pub(crate) fn build_font_encodings(
             base = builtin_base_encoding(doc, font_dict);
         }
         // Another Type 1 font whose encoding names no base reads through
-        // the encoding of its embedded program, beneath its Differences.
-        if base.is_none() {
+        // the encoding of its embedded program, beneath its Differences —
+        // unless its Differences name only codes nothing here can read,
+        // which keeps it without an encoding (below).
+        if base.is_none() && !reads_nothing_it_names(&named_codes, &differences, &sequences) {
             let (program_base, readings) =
                 type1_builtin_encoding(doc, font_dict, &named_codes, font_cache);
             base = program_base;
@@ -1025,6 +1027,18 @@ fn builtin_base_encoding(doc: &Document, font_dict: &lopdf::Dictionary) -> Optio
     }
 }
 
+/// Whether a font's `/Differences` name codes and read none of them: such a
+/// font gets no encoding (see `build_font_encodings`), so its codes read as
+/// the single-byte characters they are, and its program's encoding does not
+/// give it one either.
+fn reads_nothing_it_names(
+    named_codes: &std::collections::HashSet<u8>,
+    differences: &FontEncodingMap,
+    sequences: &HashMap<u8, String>,
+) -> bool {
+    !named_codes.is_empty() && differences.is_empty() && sequences.is_empty()
+}
+
 /// The base encoding a Type 1 font whose `/Encoding` names none reads
 /// through: the built-in encoding of its embedded program (PDF 32000-1:2008,
 /// Table 114). A font without an `/Encoding`, or with an encoding
@@ -1078,8 +1092,8 @@ fn type1_builtin_encoding(
                     })?;
                     let private =
                         |c: char| ('\u{E000}'..='\u{F8FF}').contains(&c) || c >= '\u{F0000}';
-                    let combining = |c: char| ('\u{0300}'..='\u{036F}').contains(&c);
-                    let reads = !text.chars().any(private) && !text.chars().all(combining);
+                    let reads = !text.chars().any(private)
+                        && !text.chars().all(crate::bidi::is_combining_mark);
                     reads.then_some((*code, text))
                 })
                 .collect();

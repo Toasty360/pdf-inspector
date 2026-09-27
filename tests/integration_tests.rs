@@ -10220,8 +10220,8 @@ fn type1_program(encoding: &str) -> Vec<u8> {
 /// and digits where ASCII has them, the ligatures below the space, curly
 /// quotes and dashes where ASCII has straight quotes, a backslash and
 /// braces, a glyph whose name no glyph list reads, an old-style zero,
-/// which the glyph list reads as a private code point, and a wide accent,
-/// which it reads as a combining mark.
+/// which the glyph list reads as a private code point, and a wide accent
+/// and an arrow accent, which read as combining marks.
 fn tex_text_encoding() -> String {
     let mut entry = String::from("/Encoding 256 array\n0 1 255 {1 index exch /.notdef put} for\n");
     for (code, name) in [
@@ -10239,6 +10239,7 @@ fn tex_text_encoding() -> String {
         (94, "hatwide"),
         (123, "endash"),
         (124, "emdash"),
+        (126, "uni20D7"),
     ] {
         entry.push_str(&format!("dup {code} /{name} put\n"));
     }
@@ -10338,8 +10339,8 @@ fn embedded_type1_lines(
 }
 
 /// Ligatures, curly quotes and a dash, as TeX's text faces show them, and
-/// the glyph whose name does not read, the old-style zero and the accent.
-const TEX_STRINGS: [&str; 7] = [
+/// the glyph whose name does not read, the old-style zero and the accents.
+const TEX_STRINGS: [&str; 8] = [
     "\\014nd",
     "e\\013ect",
     "\\134quoted\\042",
@@ -10347,6 +10348,7 @@ const TEX_STRINGS: [&str; 7] = [
     "\\130",
     "\\0601",
     "\\136",
+    "\\176",
 ];
 
 #[test]
@@ -10369,7 +10371,8 @@ fn test_type1_font_without_an_encoding_reads_through_its_programs_encoding() {
             "1\u{2013}2",
             "X",
             "01",
-            "^"
+            "^",
+            "~"
         ]
     );
 }
@@ -10437,6 +10440,31 @@ fn test_type1_programs_encoding_yields_to_the_fonts_own_readings() {
             &[TEX_STRINGS[0], TEX_STRINGS[3]],
         );
         assert_eq!(lines, ["nd", "1{2"], "{encoding:?}");
+    }
+
+    // Differences whose names none reads (glyphs named by the character
+    // itself) keep the font without an encoding, whatever its program says:
+    // the codes read as the single-byte characters they are.
+    for program in [
+        type1_program(&tex_text_encoding()),
+        type1_program("/Encoding StandardEncoding def"),
+    ] {
+        let lines = embedded_type1_lines(
+            |doc| {
+                let encoding = dictionary! {
+                    "Type" => "Encoding",
+                    "Differences" => vec![
+                        0x3D.into(),
+                        Object::Name(b"=".to_vec()),
+                        0x3B.into(),
+                        Object::Name(b";".to_vec()),
+                    ],
+                };
+                add_embedded_type1_font(doc, program.clone(), Some(encoding.into()), None)
+            },
+            &["a=b;"],
+        );
+        assert_eq!(lines, ["a=b;"], "names that do not read");
     }
 
     // A program whose encoding cannot be read leaves the font as it was.

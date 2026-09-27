@@ -54,7 +54,8 @@ pub(crate) fn builtin_encoding(program: &[u8]) -> Option<BuiltinEncoding> {
                     (name != b".notdef").then(|| String::from_utf8_lossy(name).into_owned());
             }
             // `0 1 255 {1 index exch /.notdef put} for`: every code starts
-            // as `.notdef`.
+            // as `.notdef`. A loop whose body puts anything else is not
+            // read.
             Token::Word(first) if integer(first).is_some() => {
                 for _ in 0..2 {
                     match tokens.next()? {
@@ -65,15 +66,18 @@ pub(crate) fn builtin_encoding(program: &[u8]) -> Option<BuiltinEncoding> {
                 if tokens.next()? != Token::Open(b'{') {
                     return None;
                 }
-                let mut depth = 1;
+                let (mut depth, mut notdef, mut put) = (1, false, false);
                 while depth > 0 {
                     match tokens.next()? {
                         Token::Open(b'{') => depth += 1,
                         Token::Close(b'}') => depth -= 1,
+                        Token::Name(b".notdef") => notdef = true,
+                        Token::Name(_) => return None,
+                        Token::Word(b"put") => put = true,
                         _ => {}
                     }
                 }
-                if tokens.next()? != Token::Word(b"for") {
+                if !(notdef && put) || tokens.next()? != Token::Word(b"for") {
                     return None;
                 }
             }
@@ -91,16 +95,26 @@ pub(crate) fn builtin_encoding(program: &[u8]) -> Option<BuiltinEncoding> {
     ))
 }
 
-/// The cleartext part of a Type 1 program: the text before `eexec`, which
-/// starts the encrypted part. A PFB segment header some producers leave in
-/// front of it is skipped.
+/// The cleartext part of a Type 1 program: the text before the `eexec`
+/// operator, which starts the encrypted part. The operator is found as a
+/// token, so a comment, a string or a name that spells it does not end the
+/// part early. A PFB segment header some producers leave in front of it is
+/// skipped.
 fn cleartext(program: &[u8]) -> Option<&[u8]> {
     let program = match program {
         [0x80, 0x01, _, _, _, _, rest @ ..] => rest,
         _ => program,
     };
-    let end = program.windows(5).position(|window| window == b"eexec")?;
-    Some(&program[..end])
+    let mut tokens = Tokens { rest: program };
+    while let Some(token) = tokens.next() {
+        if let Token::Word(word) = token {
+            if word == b"eexec" {
+                let end = program.len() - tokens.rest.len() - word.len();
+                return Some(&program[..end]);
+            }
+        }
+    }
+    None
 }
 
 /// Whether the definition an entry's value opens ends where it should:
@@ -316,6 +330,27 @@ mod tests {
             builtin_encoding(&program("/Encoding 256 array dup 32 /space put def")),
             custom(&[(32, "space")])
         );
+    }
+
+    #[test]
+    fn eexec_spelled_in_a_comment_a_string_or_a_name_does_not_end_the_cleartext() {
+        let mut body = b"%!PS-AdobeFont-1.0: TestFace\n% the eexec part follows\n\
+            /Notice (encrypted after eexec) readonly def\n/Marker /eexec def\n"
+            .to_vec();
+        body.extend_from_slice(&program("/Encoding 256 array dup 12 /fi put readonly def"));
+        assert_eq!(builtin_encoding(&body), custom(&[(12, "fi")]));
+    }
+
+    #[test]
+    fn a_fill_loop_that_puts_anything_but_notdef_reads_as_none() {
+        for fill in [
+            "0 1 255 {1 index exch /space put} for",
+            "0 1 255 {pop} for",
+            "0 1 255 {1 index exch /.notdef} for",
+        ] {
+            let entry = format!("/Encoding 256 array {fill} dup 12 /fi put readonly def");
+            assert_eq!(builtin_encoding(&program(&entry)), None, "{fill}");
+        }
     }
 
     #[test]
