@@ -1915,19 +1915,49 @@ fn cmap_keyed_by_glyph_index(cmap: &ToUnicodeCMap, cid_to_gid: &[u16]) -> Option
     }
 }
 
+/// The most codes of each CMap [`program_reads_cmap_as_written`] reads the
+/// program at: the lowest, which the two readings it compares share (the
+/// renumbered CMap's codes 1, 2, 3, … are the CMap's codes in order), so
+/// the CMap of a whole large font costs no more to judge than a subset's.
+const MAX_RENUMBERING_CHECK_CODES: usize = 1024;
+
+/// The characters an embedded program's cmap sends a glyph to when the
+/// glyph reads as `text`, a CMap's entry: the text's one character, or the
+/// ligature it spells, as a CMap writes the glyph of U+FB01 as `fi`.
+fn cmap_chars_reading_as(text: &str) -> Vec<char> {
+    let mut chars = text.chars();
+    if let (Some(ch), None) = (chars.next(), chars.next()) {
+        return vec![ch];
+    }
+    let spelled = crate::text_utils::expand_ligatures(text);
+    ('\u{FB00}'..='\u{FB06}')
+        .filter(|ligature| crate::text_utils::expand_ligatures(&ligature.to_string()) == spelled)
+        .collect()
+}
+
+/// Whether a glyph a program names `name` reads as `text`, a CMap's entry:
+/// the characters the name spells are the text's once ligatures are
+/// spelled out, as the glyph named `fi` (U+FB01) reads as `fi`.
+fn glyph_name_reads_as(name: &str, text: &str) -> bool {
+    glyph_name_to_string(name).is_some_and(|named| {
+        crate::text_utils::expand_ligatures(&named) == crate::text_utils::expand_ligatures(text)
+    })
+}
+
 /// Whether an Identity CID font's embedded `program` reads the font's codes
 /// as `cmap`, its ToUnicode CMap, has them — rather than as `renumbered`,
 /// the CMap renumbered by [`ToUnicodeCMap::remap_to_sequential`] for a
 /// subset that renumbered its glyphs and kept the CMap of the whole font.
 /// Under an Identity CIDToGIDMap a code is its glyph's index, and a glyph
-/// reads as a text when the program's cmap sends the text's one character
-/// to it, or its glyph name spells the text. Each CMap counts the codes it
-/// has a usable entry for — some text, not nothing or U+FFFD — whose glyph
-/// reads as that entry; only the codes a CMap maps below the program's
-/// glyph count are looked at. `Some(true)` when the CMap as written agrees
-/// on more codes, `Some(false)` when the renumbered one does, and `None`
-/// when the program does not parse, says nothing of those glyphs, or both
-/// agree on as many.
+/// reads as a text when the program's cmap sends it the text's character
+/// or ligature ([`cmap_chars_reading_as`]), or its glyph name spells the
+/// text ([`glyph_name_reads_as`]). Each CMap counts the codes it has a
+/// usable entry for — some text, not nothing or U+FFFD — whose glyph reads
+/// as that entry, over the lowest [`MAX_RENUMBERING_CHECK_CODES`] codes it
+/// maps below the program's glyph count. `Some(true)` when the CMap as
+/// written agrees on more codes, `Some(false)` when the renumbered one
+/// does, and `None` when the program does not parse, says nothing of those
+/// glyphs, or both agree on as many.
 fn program_reads_cmap_as_written(
     cmap: &ToUnicodeCMap,
     renumbered: &ToUnicodeCMap,
@@ -1937,21 +1967,18 @@ fn program_reads_cmap_as_written(
     let glyphs = face.number_of_glyphs();
     let reads_as = |gid: u16, text: &str| {
         let glyph = ttf_parser::GlyphId(gid);
-        let mut chars = text.chars();
-        let by_cmap = matches!(
-            (chars.next(), chars.next()),
-            (Some(ch), None) if face.glyph_index(ch) == Some(glyph)
-        );
-        by_cmap
+        cmap_chars_reading_as(text)
+            .into_iter()
+            .any(|ch| face.glyph_index(ch) == Some(glyph))
             || face
                 .glyph_name(glyph)
-                .and_then(glyph_name_to_string)
-                .is_some_and(|name| name == text)
+                .is_some_and(|name| glyph_name_reads_as(name, text))
     };
     let agreeing = |cmap: &ToUnicodeCMap| {
         cmap.mapped_runs()
             .into_iter()
             .flat_map(|(first, last)| first.max(1)..=last.min(glyphs.saturating_sub(1)))
+            .take(MAX_RENUMBERING_CHECK_CODES)
             .filter(|&code| {
                 cmap.lookup(code).is_some_and(|text| {
                     !text.is_empty() && !text.contains('\u{FFFD}') && reads_as(code, &text)
@@ -5379,6 +5406,26 @@ endbfrange
         let (primary, remapped) = try_remap_subset_cmap(cmap, &font_dict, &doc, 791, || None);
         assert!(remapped.is_none());
         assert_eq!(primary.lookup(0x45), Some("a".to_string()));
+    }
+
+    #[test]
+    fn a_cmap_entry_reads_as_its_ligature_through_a_program() {
+        // A CMap writes a ligature glyph's text as its letters or as the
+        // ligature's code point, and a program's cmap sends it the
+        // ligature's code point either way.
+        assert_eq!(cmap_chars_reading_as("a"), ['a']);
+        assert_eq!(cmap_chars_reading_as("\u{FB01}"), ['\u{FB01}']);
+        assert_eq!(cmap_chars_reading_as("fi"), ['\u{FB01}']);
+        assert_eq!(cmap_chars_reading_as("ffl"), ['\u{FB04}']);
+        assert_eq!(cmap_chars_reading_as("st"), ['\u{FB05}', '\u{FB06}']);
+        assert!(cmap_chars_reading_as("ab").is_empty());
+        // A glyph name reads as the text it spells, ligatures spelled out.
+        assert!(glyph_name_reads_as("fi", "fi"));
+        assert!(glyph_name_reads_as("fi", "\u{FB01}"));
+        assert!(glyph_name_reads_as("f_f_i", "ffi"));
+        assert!(glyph_name_reads_as("parenleft", "("));
+        assert!(!glyph_name_reads_as("fi", "fl"));
+        assert!(!glyph_name_reads_as(".notdef", ""));
     }
 
     #[test]
