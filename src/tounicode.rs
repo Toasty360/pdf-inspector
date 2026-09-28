@@ -3303,8 +3303,8 @@ impl FontCMaps {
                 // only outside fast mode, which leaves that parsing to the
                 // regions it sends to OCR; fast mode leaves the program to
                 // them for the repair of the control destinations too, whose
-                // codes stay marked. The one read of a Type0 font's program
-                // in either mode is the subset remap's, and only for a font
+                // codes stay marked. In fast mode the one read of a Type0
+                // font's program is the subset remap's, and only for a font
                 // whose width array looks renumbered (see
                 // `try_remap_subset_cmap`): nothing else tells a stale CMap
                 // from a right one there.
