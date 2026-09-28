@@ -4368,12 +4368,13 @@ fn finish_loaded_document(
 }
 
 /// Per-stream decompression budget applied while loading (object streams and
-/// xref streams), the bound within which the detector reads a font's
-/// ToUnicode CMap (`detector::font_decoder`), and the one within which a CID
-/// font's embedded program is read to tell whether its subset was
-/// renumbered (`tounicode::try_remap_subset_cmap`): neither stream costs more
-/// than a stream the loader materializes, and changing one of these bounds
-/// means changing all three. Some tagged PDFs pack their structure tree into object
+/// xref streams), and the bound within which the detector reads a font's
+/// ToUnicode CMap (`detector::font_decoder`), object streams are read again
+/// for overlong numerals (`overlong_numerals`), and a CID font's embedded
+/// program is read to tell whether its subset was renumbered
+/// (`tounicode::try_remap_subset_cmap`): none of those streams costs more
+/// than a stream the loader materializes, and changing the bound changes
+/// them all. Some tagged PDFs pack their structure tree into object
 /// streams that inflate to hundreds of MB each from a ~20MB file; lopdf
 /// materializes every object stream eagerly at load, so without a bound one
 /// such document exhausts memory before any of our code runs. lopdf skips an
