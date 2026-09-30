@@ -21,9 +21,9 @@ bugs.
 
 ## Acknowledgments
 
-We credit security researchers in the release notes of the release that
-fixes their report. Let us know in your report if you'd like a specific
-name, handle, or link used.
+With your permission, we credit security researchers in the release notes of the release that
+fixes their report. Let us know whether you'd like to be credited and, if so, what
+name, handle, or link to use.
 
 ## Scope
 
