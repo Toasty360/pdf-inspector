@@ -360,9 +360,7 @@ fn page_content_inflating_past_the_byte_budget_is_skipped() {
          shows-only-a-hidden-text-layer verdict can rest on it"
     );
 }
-/// A bound form's Flate content that inflates past the walk's remaining
-/// byte budget is refused before it is held, and no bound form after it
-/// is read — as the executed-form budget refuses — while the forms the
+
 /// A bound form's Flate content that inflates past the walk's remaining
 /// byte budget is refused before it is held, and no bound form after it
 /// is read — as the executed-form budget refuses — while the forms the
@@ -493,7 +491,19 @@ fn bound_form_chain_deeper_than_the_depth_cap_stops() {
         next
     }
 
-    for (depth, expect_text_ops) in [(10, 1), (70, 0)] {
+    // Within the cap the chain is read whole; a form deeper than the cap
+    // is not reached — the first case on either side of it included.
+    for depth in [
+        10,
+        crate::MAX_XOBJECT_RESOURCE_DEPTH as usize,
+        crate::MAX_XOBJECT_RESOURCE_DEPTH as usize + 1,
+        70,
+    ] {
+        let expect_text_ops = if depth <= crate::MAX_XOBJECT_RESOURCE_DEPTH as usize {
+            1
+        } else {
+            0
+        };
         let mut doc = Document::with_version("1.4");
         let head = chain(&mut doc, depth);
         let resources = dictionary! {

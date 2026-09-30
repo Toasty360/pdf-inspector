@@ -3687,7 +3687,7 @@ impl FontCMaps {
     /// handful of forms deep; past this many the walk stops, so a crafted
     /// deep chain cannot exhaust the stack — the same bound, and for the
     /// same reason, as the detector's resource walks
-    /// ([`crate::detector::MAX_XOBJECT_RESOURCE_DEPTH`]).
+    /// ([`crate::MAX_XOBJECT_RESOURCE_DEPTH`]).
     fn walk_xobject_fonts(
         resources: &lopdf::Dictionary,
         doc: &Document,
@@ -3695,7 +3695,7 @@ impl FontCMaps {
         visited: &mut HashSet<ObjectId>,
         depth: u32,
     ) {
-        if depth >= crate::detector::MAX_XOBJECT_RESOURCE_DEPTH {
+        if depth >= crate::MAX_XOBJECT_RESOURCE_DEPTH {
             return;
         }
         let xobject_dict = match resources.get(b"XObject") {

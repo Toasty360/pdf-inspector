@@ -1806,13 +1806,6 @@ fn used_fonts_have_decodable_text(
     false
 }
 
-/// A Form XObject's resource dictionary naming another Form, whose
-/// dictionary names another, is a recursion the `visited` set does not
-/// bound: it stops cycles and re-reads, not depth. Real documents nest a
-/// handful of forms deep; past this many the walk stops and the page's
-/// evidence is incomplete, which a stack overflow would end far sooner.
-pub(crate) const MAX_XOBJECT_RESOURCE_DEPTH: u32 = 64;
-
 #[allow(clippy::too_many_arguments)]
 fn scan_xobjects_in_resources(
     doc: &Document,
@@ -1825,12 +1818,19 @@ fn scan_xobjects_in_resources(
     bytes_left: &mut usize,
     truncated: &mut bool,
 ) -> ContentCounts {
-    if depth >= MAX_XOBJECT_RESOURCE_DEPTH {
-        // Past the cap the walk stops and the page's evidence is
-        // incomplete, as a refusal past the byte budget makes it: the
-        // forms it did not read may hold the text or images the tallies
-        // then show none of, and no claim rests on them.
-        *truncated = true;
+    if depth >= crate::MAX_XOBJECT_RESOURCE_DEPTH {
+        // Past the cap the walk stops, and any form still bound deeper
+        // holds evidence it does not read — the tallies are then
+        // incomplete, as a refusal past the byte budget makes them. An
+        // empty binding leaves nothing deeper to read and no claim
+        // incomplete.
+        if let Ok(xobject) = resources.get(b"XObject") {
+            let binds_something = matches!(xobject, Object::Reference(_))
+                || xobject.as_dict().is_ok_and(|d| !d.is_empty());
+            if binds_something {
+                *truncated = true;
+            }
+        }
         return ContentCounts::default();
     }
     let mut counts = ContentCounts::default();
@@ -2365,7 +2365,7 @@ fn collect_images_from_resources(
     visited: &mut HashSet<ObjectId>,
     depth: u32,
 ) {
-    if depth >= MAX_XOBJECT_RESOURCE_DEPTH {
+    if depth >= crate::MAX_XOBJECT_RESOURCE_DEPTH {
         return;
     }
     let xobject = match resources.get(b"XObject") {
