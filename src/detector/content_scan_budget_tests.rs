@@ -432,6 +432,7 @@ fn bound_form_inflating_past_the_walk_budget_is_skipped() {
         &mut unique_chars,
         &mut used_font_ids,
         &mut font_map,
+        0,
         &mut bytes_left,
         &mut truncated,
     );
@@ -443,4 +444,86 @@ fn bound_form_inflating_past_the_walk_budget_is_skipped() {
         truncated,
         "the refused form leaves the walk's tallies incomplete, so no claim rests on them"
     );
+}
+
+/// A chain of bound Forms, each resource dictionary naming the next, goes
+/// only as deep as the walk's depth cap: the innermost form of a chain
+/// longer than the cap is never reached, while one well within it is.
+#[test]
+fn bound_form_chain_deeper_than_the_depth_cap_stops() {
+    use lopdf::dictionary;
+
+    fn chain(doc: &mut Document, depth: usize) -> ObjectId {
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => Object::Name(b"Type1".to_vec()),
+            "BaseFont" => Object::Name(b"Helvetica".to_vec()),
+        });
+        // The innermost form shows text; every form above it binds the
+        // one before it as `X0`, and nothing draws anything.
+        let mut next = doc.add_object(Object::Stream(lopdf::Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => Object::Name(b"Form".to_vec()),
+                "BBox" => vec![Object::Integer(0), Object::Integer(0),
+                               Object::Integer(612), Object::Integer(792)],
+                "Resources" => dictionary! {
+                    "Font" => dictionary! { "F1" => Object::Reference(font_id) },
+                },
+            },
+            b"BT /F1 12 Tf 72 720 Td (Hi) Tj ET".to_vec(),
+        )));
+        for _ in 1..depth {
+            next = doc.add_object(Object::Stream(lopdf::Stream::new(
+                dictionary! {
+                    "Type" => "XObject",
+                    "Subtype" => Object::Name(b"Form".to_vec()),
+                    "BBox" => vec![Object::Integer(0), Object::Integer(0),
+                                   Object::Integer(612), Object::Integer(792)],
+                    "Resources" => dictionary! {
+                        "XObject" => dictionary! { "X0" => Object::Reference(next) },
+                    },
+                },
+                Vec::new(),
+            )));
+        }
+        next
+    }
+
+    for (depth, expect_text_ops) in [(10, 1), (70, 0)] {
+        let mut doc = Document::with_version("1.4");
+        let head = chain(&mut doc, depth);
+        let resources = dictionary! {
+            "XObject" => dictionary! { "X0" => Object::Reference(head) },
+        };
+        let page_id = page_of_streams(&mut doc, resources, vec![]);
+        let page_resources = doc
+            .get_object(page_id)
+            .and_then(Object::as_dict)
+            .unwrap()
+            .get(b"Resources")
+            .and_then(Object::as_dict)
+            .unwrap()
+            .clone();
+
+        let mut visited = HashSet::new();
+        let mut unique_chars = HashSet::new();
+        let mut used_font_ids = HashSet::new();
+        let mut font_map = HashMap::new();
+        let mut bytes_left = crate::extractor::content_decode::MAX_PAGE_CONTENT_BYTES;
+        let counts = scan_xobjects_in_resources(
+            &doc,
+            &page_resources,
+            &mut visited,
+            &mut unique_chars,
+            &mut used_font_ids,
+            &mut font_map,
+            0,
+            &mut bytes_left,
+        );
+        assert_eq!(
+            counts.text_ops, expect_text_ops,
+            "a chain {depth} deep shows its innermost form's text only within the cap"
+        );
+    }
 }

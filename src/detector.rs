@@ -934,6 +934,7 @@ fn analyze_page_content(doc: &Document, page_id: ObjectId) -> PageAnalysis {
                 &mut all_unique_chars,
                 &mut used_font_ids,
                 &mut font_map,
+                0,
                 &mut bound_form_bytes_left,
                 &mut bound_walk_truncated,
             ));
@@ -948,6 +949,7 @@ fn analyze_page_content(doc: &Document, page_id: ObjectId) -> PageAnalysis {
                     &mut all_unique_chars,
                     &mut used_font_ids,
                     &mut font_map,
+                    0,
                     &mut bound_form_bytes_left,
                     &mut bound_walk_truncated,
                 ));
@@ -1804,6 +1806,13 @@ fn used_fonts_have_decodable_text(
     false
 }
 
+/// A Form XObject's resource dictionary naming another Form, whose
+/// dictionary names another, is a recursion the `visited` set does not
+/// bound: it stops cycles and re-reads, not depth. Real documents nest a
+/// handful of forms deep; past this many the walk stops and the page's
+/// evidence is incomplete, which a stack overflow would end far sooner.
+const MAX_XOBJECT_RESOURCE_DEPTH: u32 = 64;
+
 #[allow(clippy::too_many_arguments)]
 fn scan_xobjects_in_resources(
     doc: &Document,
@@ -1812,9 +1821,13 @@ fn scan_xobjects_in_resources(
     unique_chars: &mut HashSet<u8>,
     used_font_ids: &mut HashSet<ObjectId>,
     font_map: &mut HashMap<ObjectId, FontInfo>,
+    depth: u32,
     bytes_left: &mut usize,
     truncated: &mut bool,
 ) -> ContentCounts {
+    if depth >= MAX_XOBJECT_RESOURCE_DEPTH {
+        return ContentCounts::default();
+    }
     let mut counts = ContentCounts::default();
 
     let xobjects = match resources.get(b"XObject").ok() {
@@ -1901,6 +1914,7 @@ fn scan_xobjects_in_resources(
                             unique_chars,
                             used_font_ids,
                             font_map,
+                            depth + 1,
                             bytes_left,
                             truncated,
                         ));
@@ -2189,6 +2203,7 @@ pub(crate) fn analyze_page_images(doc: &Document, page_id: ObjectId) -> (bool, u
                 &mut has_template_image,
                 TEMPLATE_IMAGE_THRESHOLD,
                 &mut visited,
+                0,
             );
 
             // Also check Pattern resources: tiling patterns can contain
@@ -2225,6 +2240,7 @@ pub(crate) fn analyze_page_images(doc: &Document, page_id: ObjectId) -> (bool, u
                                         &mut has_template_image,
                                         TEMPLATE_IMAGE_THRESHOLD,
                                         &mut visited,
+                                        1,
                                     );
                                 }
                             }
@@ -2329,6 +2345,7 @@ pub(crate) struct PageOcrSignals {
 
 /// Recursively collect image dimensions from XObject resources,
 /// including images nested inside Form XObjects.
+#[allow(clippy::too_many_arguments)]
 fn collect_images_from_resources(
     doc: &Document,
     resources: &lopdf::Dictionary,
@@ -2337,7 +2354,11 @@ fn collect_images_from_resources(
     has_template_image: &mut bool,
     threshold: u64,
     visited: &mut HashSet<ObjectId>,
+    depth: u32,
 ) {
+    if depth >= MAX_XOBJECT_RESOURCE_DEPTH {
+        return;
+    }
     let xobject = match resources.get(b"XObject") {
         Ok(obj) => obj,
         _ => return,
@@ -2412,6 +2433,7 @@ fn collect_images_from_resources(
                         has_template_image,
                         threshold,
                         visited,
+                        depth + 1,
                     );
                 }
             }
