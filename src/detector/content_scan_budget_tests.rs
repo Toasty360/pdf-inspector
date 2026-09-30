@@ -542,7 +542,7 @@ fn bound_form_chain_deeper_than_the_depth_cap_stops() {
         );
         assert_eq!(
             truncated,
-            depth > 64,
+            depth > crate::MAX_XOBJECT_RESOURCE_DEPTH as usize,
             "a chain past the cap leaves the walk's tallies incomplete, as a refusal past \
              the byte budget does; one within it does not"
         );

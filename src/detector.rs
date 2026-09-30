@@ -963,9 +963,14 @@ fn analyze_page_content(doc: &Document, page_id: ObjectId) -> PageAnalysis {
 
     // Check for XObject images and calculate coverage. An image the
     // content drew — an inline image, or one a pattern's cell draws — is
-    // an image of the page too, whatever its resources bind.
-    let (found_images, total_image_area, has_template_image) = analyze_page_images(doc, page_id);
+    // an image of the page too, whatever its resources bind. Its walk
+    // stopping past the depth cap with an XObject still bound deeper
+    // leaves the image tallies incomplete, like the bound-form walk's
+    // byte budget does the text ones, so the same flag carries both.
+    let (found_images, total_image_area, has_template_image, images_walk_truncated) =
+        analyze_page_images(doc, page_id);
     let has_images = image_count > 0 || found_images || executed.draws_image;
+    bound_walk_truncated |= images_walk_truncated;
 
     // The images the page's content drew — in its own streams and in the
     // forms they invoke, each draw clipped to the page — cover the page
@@ -1032,9 +1037,10 @@ fn analyze_page_content(doc: &Document, page_id: ObjectId) -> PageAnalysis {
 
     if bound_walk_truncated {
         log::debug!(
-            "page {page_id:?}: a bound Form XObject's content ran past the walk's byte \
-             budget and it, with every form after it, went unread; the walk's tallies \
-             are incomplete and no no_text verdict rests on them"
+            "page {page_id:?}: a resource walk stopped — a bound Form XObject's \
+             content past its byte budget, or a resource chain past its depth cap — \
+             with something still bound deeper; the walk's tallies are incomplete \
+             and no no_text verdict rests on them"
         );
     }
 
@@ -1806,6 +1812,20 @@ fn used_fonts_have_decodable_text(
     false
 }
 
+/// Whether a resource dictionary still binds an XObject — directly, or
+/// through a reference the walks would resolve — that a depth cap would
+/// keep them from reading: one named deeper holds evidence a capped walk
+/// does not collect, so its evidence is incomplete. An empty binding,
+/// direct or resolved, leaves nothing deeper to read and no claim
+/// incomplete.
+fn xobject_bound_deeper(doc: &Document, resources: &lopdf::Dictionary) -> bool {
+    match resources.get(b"XObject") {
+        Ok(Object::Reference(id)) => doc.get_dictionary(*id).is_ok_and(|d| !d.is_empty()),
+        Ok(Object::Dictionary(d)) => !d.is_empty(),
+        _ => false,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn scan_xobjects_in_resources(
     doc: &Document,
@@ -1821,15 +1841,9 @@ fn scan_xobjects_in_resources(
     if depth >= crate::MAX_XOBJECT_RESOURCE_DEPTH {
         // Past the cap the walk stops, and any form still bound deeper
         // holds evidence it does not read — the tallies are then
-        // incomplete, as a refusal past the byte budget makes them. An
-        // empty binding leaves nothing deeper to read and no claim
-        // incomplete.
-        if let Ok(xobject) = resources.get(b"XObject") {
-            let binds_something = matches!(xobject, Object::Reference(_))
-                || xobject.as_dict().is_ok_and(|d| !d.is_empty());
-            if binds_something {
-                *truncated = true;
-            }
+        // incomplete, as a refusal past the byte budget makes them.
+        if xobject_bound_deeper(doc, resources) {
+            *truncated = true;
         }
         return ContentCounts::default();
     }
@@ -2174,15 +2188,19 @@ fn hex_val(b: u8) -> Option<u8> {
 /// Standard page: 612x792 points (US Letter) = ~485,000 sq points
 /// At 2x resolution that's ~1.9M pixels, so we use 250K pixels as threshold
 /// (accounting for varying DPI and page sizes)
-/// Returns `(has_images, total_image_area, has_template_image)` for a page.
-/// `has_template_image` means a single large (>50% page coverage)
-/// background image — the signal `classify_pdf`/`detect_pdf_type` uses to
-/// route a page to OCR regardless of any incidental native text drawn over
-/// it. Exposed at crate visibility so extraction-side per-page `needs_ocr`
-/// computation (`extract_pages_markdown_mem`) can consult the same signal
-/// instead of maintaining its own, independent notion of "needs OCR" that
-/// can silently disagree with detection — see #227.
-pub(crate) fn analyze_page_images(doc: &Document, page_id: ObjectId) -> (bool, u64, bool) {
+/// Returns `(has_images, total_image_area, has_template_image,
+/// walk_truncated)` for a page. `has_template_image` means a single large
+/// (>50% page coverage) background image — the signal
+/// `classify_pdf`/`detect_pdf_type` uses to route a page to OCR
+/// regardless of any incidental native text drawn over it. Exposed at
+/// crate visibility so extraction-side per-page `needs_ocr` computation
+/// (`extract_pages_markdown_mem`) can consult the same signal instead of
+/// maintaining its own, independent notion of "needs OCR" that can
+/// silently disagree with detection — see #227. `walk_truncated` says
+/// the resource walk stopped past its depth cap with an XObject still
+/// bound deeper: the image tallies are then incomplete, like the
+/// bound-form walk's are when a form runs past its byte budget.
+pub(crate) fn analyze_page_images(doc: &Document, page_id: ObjectId) -> (bool, u64, bool, bool) {
     // Threshold: image covering roughly half a page at 150+ DPI
     // 612 * 792 / 2 * (150/72)^2 ≈ 1M pixels, but we'll be conservative
     const TEMPLATE_IMAGE_THRESHOLD: u64 = 500_000; // 500K pixels
@@ -2190,6 +2208,7 @@ pub(crate) fn analyze_page_images(doc: &Document, page_id: ObjectId) -> (bool, u
     let mut has_images = false;
     let mut total_area: u64 = 0;
     let mut has_template_image = false;
+    let mut walk_truncated = false;
     let mut visited: HashSet<ObjectId> = HashSet::new();
 
     if let Ok(page_dict) = doc.get_dictionary(page_id) {
@@ -2209,6 +2228,7 @@ pub(crate) fn analyze_page_images(doc: &Document, page_id: ObjectId) -> (bool, u
                 TEMPLATE_IMAGE_THRESHOLD,
                 &mut visited,
                 0,
+                &mut walk_truncated,
             );
 
             // Also check Pattern resources: tiling patterns can contain
@@ -2250,6 +2270,7 @@ pub(crate) fn analyze_page_images(doc: &Document, page_id: ObjectId) -> (bool, u
                                         // form levels the cap counts, so a chain
                                         // through it gets the same headroom.
                                         0,
+                                        &mut walk_truncated,
                                     );
                                 }
                             }
@@ -2267,7 +2288,7 @@ pub(crate) fn analyze_page_images(doc: &Document, page_id: ObjectId) -> (bool, u
         has_template_image = true;
     }
 
-    (has_images, total_area, has_template_image)
+    (has_images, total_area, has_template_image, walk_truncated)
 }
 
 /// Computes `template_image_needs_ocr`, `has_vector_text` and
@@ -2364,8 +2385,16 @@ fn collect_images_from_resources(
     threshold: u64,
     visited: &mut HashSet<ObjectId>,
     depth: u32,
+    truncated: &mut bool,
 ) {
     if depth >= crate::MAX_XOBJECT_RESOURCE_DEPTH {
+        // Past the cap the walk stops, and an XObject still bound deeper
+        // holds images it does not count: the image tallies are then
+        // incomplete, as the bound-form walk's are when a form runs past
+        // its byte budget.
+        if xobject_bound_deeper(doc, resources) {
+            *truncated = true;
+        }
         return;
     }
     let xobject = match resources.get(b"XObject") {
@@ -2443,6 +2472,7 @@ fn collect_images_from_resources(
                         threshold,
                         visited,
                         depth + 1,
+                        truncated,
                     );
                 }
             }
