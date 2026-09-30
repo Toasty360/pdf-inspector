@@ -19,6 +19,12 @@ We'll acknowledge your report in a timely manner and keep you updated on
 remediation progress. Please do not open a public GitHub issue for security
 bugs.
 
+## Acknowledgments
+
+We credit security researchers in the release notes of the release that
+fixes their report. Let us know in your report if you'd like a specific
+name, handle, or link used.
+
 ## Scope
 
 In scope:
