@@ -908,6 +908,9 @@ fn analyze_page_content(doc: &Document, page_id: ObjectId) -> PageAnalysis {
     // and resolve font names per-XObject scope.
     if let Some((resource_dict, resource_ids)) = page_resources {
         let mut visited = HashSet::new();
+        // One byte budget over every bound form the walk reads, so the
+        // decoded content of them all costs no more than a page's.
+        let mut bound_form_bytes_left = crate::extractor::content_decode::MAX_PAGE_CONTENT_BYTES;
         if let Some(resources) = resource_dict {
             collect_fonts_from_resource_dict(doc, resources, &mut font_map);
             counts.add(scan_xobjects_in_resources(
@@ -917,6 +920,7 @@ fn analyze_page_content(doc: &Document, page_id: ObjectId) -> PageAnalysis {
                 &mut all_unique_chars,
                 &mut used_font_ids,
                 &mut font_map,
+                &mut bound_form_bytes_left,
             ));
         }
         for resource_id in resource_ids {
@@ -929,6 +933,7 @@ fn analyze_page_content(doc: &Document, page_id: ObjectId) -> PageAnalysis {
                     &mut all_unique_chars,
                     &mut used_font_ids,
                     &mut font_map,
+                    &mut bound_form_bytes_left,
                 ));
             }
         }
@@ -1781,6 +1786,7 @@ fn scan_xobjects_in_resources(
     unique_chars: &mut HashSet<u8>,
     used_font_ids: &mut HashSet<ObjectId>,
     font_map: &mut HashMap<ObjectId, FontInfo>,
+    bytes_left: &mut usize,
 ) -> ContentCounts {
     let mut counts = ContentCounts::default();
 
@@ -1808,9 +1814,6 @@ fn scan_xobjects_in_resources(
                 .and_then(|o| o.as_name().ok());
             match subtype {
                 Some(b"Form") => {
-                    let content = stream
-                        .decompressed_content()
-                        .unwrap_or_else(|_| stream.content.clone());
                     // Collect raw font names from this XObject's content stream.
                     // Every form bound is counted here, invoked or not, as
                     // the text and font tallies always have been; what the
@@ -1821,13 +1824,27 @@ fn scan_xobjects_in_resources(
                         content_resources::stream_resources(doc, stream)
                             .into_iter()
                             .collect();
-                    counts.add(content_scan::scan_content_stream_alone(
-                        doc,
-                        &content,
-                        unique_chars,
-                        &mut xobj_font_names,
-                        &own_resources,
-                    ));
+                    // The form's content is decoded within the walk's
+                    // remaining byte budget; a stream that would exceed it —
+                    // a small Flate stream inflating to gigabytes — is
+                    // skipped rather than decoded, its fonts left
+                    // uncollected. Sticky, as the form budget is: from the
+                    // form that would pass the budget on, none is read —
+                    // decoding a bomb again for each later form costs the
+                    // reads the budget forbids.
+                    let content = content_resources::decoded_within(stream, *bytes_left);
+                    if let Some(content) = content.as_ref() {
+                        *bytes_left = bytes_left.saturating_sub(content.len());
+                        counts.add(content_scan::scan_content_stream_alone(
+                            doc,
+                            content,
+                            unique_chars,
+                            &mut xobj_font_names,
+                            &own_resources,
+                        ));
+                    } else {
+                        *bytes_left = 0;
+                    }
 
                     // Resolve the Form XObject's /Resources — handle both inline
                     // dicts and indirect references (P2 fix: indirect refs were
@@ -1856,6 +1873,7 @@ fn scan_xobjects_in_resources(
                             unique_chars,
                             used_font_ids,
                             font_map,
+                            bytes_left,
                         ));
                     }
                 }
