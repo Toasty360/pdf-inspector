@@ -3,8 +3,8 @@
 //! past them is refused before it is held.
 
 use super::super::{
-    analyze_page_content, detect_from_document, scan_xobjects_in_resources, DetectionConfig,
-    PdfType,
+    analyze_page_content, analyze_page_images, detect_from_document, scan_xobjects_in_resources,
+    DetectionConfig, PdfType,
 };
 use super::fixtures::*;
 use super::*;
@@ -545,6 +545,89 @@ fn bound_form_chain_deeper_than_the_depth_cap_stops() {
             depth > crate::MAX_XOBJECT_RESOURCE_DEPTH as usize,
             "a chain past the cap leaves the walk's tallies incomplete, as a refusal past \
              the byte budget does; one within it does not"
+        );
+    }
+}
+
+/// The image walk stops at the depth cap with a signal, as the bound-form
+/// walk refuses past its byte budget with one: a page whose image sits
+/// deeper than the cap shows `has_images` false with `walk_truncated`
+/// true, and one within it shows the image with no signal.
+///
+/// The image walk's boundary sits one shallower than the form walk's: a
+/// form's content is read at the form's own level, while the images it
+/// binds live one level deeper in its resources, so an image in the
+/// innermost form of a chain as deep as the cap is past it. The signal
+/// says so, and the cap protects the stack the same either way.
+#[test]
+fn image_walk_reports_a_cap_it_stops_at() {
+    use lopdf::dictionary;
+
+    fn image_in_form_chain(doc: &mut Document, depth: usize) -> ObjectId {
+        let image_id = doc.add_object(Object::Stream(lopdf::Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => Object::Name(b"Image".to_vec()),
+                "Width" => Object::Integer(2),
+                "Height" => Object::Integer(2),
+                "ColorSpace" => Object::Name(b"DeviceGray".to_vec()),
+                "BitsPerComponent" => Object::Integer(8),
+            },
+            vec![128u8; 4],
+        )));
+        // The innermost form binds the image; every form above it binds
+        // the one before it as `X0`, and nothing draws anything.
+        let mut next = doc.add_object(Object::Stream(lopdf::Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => Object::Name(b"Form".to_vec()),
+                "BBox" => vec![Object::Integer(0), Object::Integer(0),
+                               Object::Integer(612), Object::Integer(792)],
+                "Resources" => dictionary! {
+                    "XObject" => dictionary! { "Im0" => Object::Reference(image_id) },
+                },
+            },
+            Vec::new(),
+        )));
+        for _ in 1..depth {
+            next = doc.add_object(Object::Stream(lopdf::Stream::new(
+                dictionary! {
+                    "Type" => "XObject",
+                    "Subtype" => Object::Name(b"Form".to_vec()),
+                    "BBox" => vec![Object::Integer(0), Object::Integer(0),
+                                   Object::Integer(612), Object::Integer(792)],
+                    "Resources" => dictionary! {
+                        "XObject" => dictionary! { "X0" => Object::Reference(next) },
+                    },
+                },
+                Vec::new(),
+            )));
+        }
+        next
+    }
+
+    // Either side of the image walk's boundary: one below the cap, at it,
+    // and past it.
+    for depth in [
+        10,
+        crate::MAX_XOBJECT_RESOURCE_DEPTH as usize - 1,
+        crate::MAX_XOBJECT_RESOURCE_DEPTH as usize,
+        crate::MAX_XOBJECT_RESOURCE_DEPTH as usize + 1,
+    ] {
+        let mut doc = Document::with_version("1.4");
+        let head = image_in_form_chain(&mut doc, depth);
+        let resources = dictionary! {
+            "XObject" => dictionary! { "X0" => Object::Reference(head) },
+        };
+        let page_id = page_of_streams(&mut doc, resources, vec![]);
+
+        let (has_images, _, _, truncated) = analyze_page_images(&doc, page_id);
+        let within = depth < crate::MAX_XOBJECT_RESOURCE_DEPTH as usize;
+        assert_eq!(
+            (has_images, truncated),
+            (within, !within),
+            "a chain {depth} deep shows its image only within the cap, and \
+             the walk stops past it with the truncation signal set"
         );
     }
 }
