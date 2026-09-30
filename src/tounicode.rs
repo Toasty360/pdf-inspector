@@ -3680,14 +3680,14 @@ impl FontCMaps {
         }
     }
 
+    /// Recursively collect font CMaps from XObjects in a resource dictionary.
     /// A Form XObject's resource dictionary naming another Form, whose
     /// dictionary names another, is a recursion the `visited` set does not
     /// bound: it stops cycles and re-reads, not depth. Real documents nest a
     /// handful of forms deep; past this many the walk stops, so a crafted
-    /// deep chain cannot exhaust the stack.
-    const MAX_XOBJECT_RESOURCE_DEPTH: u32 = 64;
-
-    /// Recursively collect font CMaps from XObjects in a resource dictionary.
+    /// deep chain cannot exhaust the stack — the same bound, and for the
+    /// same reason, as the detector's resource walks
+    /// ([`crate::detector::MAX_XOBJECT_RESOURCE_DEPTH`]).
     fn walk_xobject_fonts(
         resources: &lopdf::Dictionary,
         doc: &Document,
@@ -3695,7 +3695,7 @@ impl FontCMaps {
         visited: &mut HashSet<ObjectId>,
         depth: u32,
     ) {
-        if depth >= Self::MAX_XOBJECT_RESOURCE_DEPTH {
+        if depth >= crate::detector::MAX_XOBJECT_RESOURCE_DEPTH {
             return;
         }
         let xobject_dict = match resources.get(b"XObject") {

@@ -1811,7 +1811,7 @@ fn used_fonts_have_decodable_text(
 /// bound: it stops cycles and re-reads, not depth. Real documents nest a
 /// handful of forms deep; past this many the walk stops and the page's
 /// evidence is incomplete, which a stack overflow would end far sooner.
-const MAX_XOBJECT_RESOURCE_DEPTH: u32 = 64;
+pub(crate) const MAX_XOBJECT_RESOURCE_DEPTH: u32 = 64;
 
 #[allow(clippy::too_many_arguments)]
 fn scan_xobjects_in_resources(
@@ -1826,6 +1826,11 @@ fn scan_xobjects_in_resources(
     truncated: &mut bool,
 ) -> ContentCounts {
     if depth >= MAX_XOBJECT_RESOURCE_DEPTH {
+        // Past the cap the walk stops and the page's evidence is
+        // incomplete, as a refusal past the byte budget makes it: the
+        // forms it did not read may hold the text or images the tallies
+        // then show none of, and no claim rests on them.
+        *truncated = true;
         return ContentCounts::default();
     }
     let mut counts = ContentCounts::default();

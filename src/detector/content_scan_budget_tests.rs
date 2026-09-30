@@ -363,6 +363,9 @@ fn page_content_inflating_past_the_byte_budget_is_skipped() {
 /// A bound form's Flate content that inflates past the walk's remaining
 /// byte budget is refused before it is held, and no bound form after it
 /// is read — as the executed-form budget refuses — while the forms the
+/// A bound form's Flate content that inflates past the walk's remaining
+/// byte budget is refused before it is held, and no bound form after it
+/// is read — as the executed-form budget refuses — while the forms the
 /// budget still admits before it are scanned whole.
 #[test]
 fn bound_form_inflating_past_the_walk_budget_is_skipped() {
@@ -523,13 +526,15 @@ fn bound_form_chain_deeper_than_the_depth_cap_stops() {
             &mut bytes_left,
             &mut truncated,
         );
-        assert!(
-            !truncated,
-            "the chain's content is all within the byte budget; only its depth is past the cap"
-        );
         assert_eq!(
             counts.text_ops, expect_text_ops,
             "a chain {depth} deep shows its innermost form's text only within the cap"
+        );
+        assert_eq!(
+            truncated,
+            depth > 64,
+            "a chain past the cap leaves the walk's tallies incomplete, as a refusal past \
+             the byte budget does; one within it does not"
         );
     }
 }
