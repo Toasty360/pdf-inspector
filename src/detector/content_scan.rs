@@ -157,7 +157,10 @@ fn scan_page<'a>(
                 // Sticky, as the form budget is: from the stream that would
                 // pass the budget on, none is read — decoding a bomb again
                 // for each later stream costs the reads the budget forbids.
+                // The page's evidence is incomplete: what the unread streams
+                // show, they still show.
                 bytes_left = 0;
+                state.incomplete = true;
                 continue;
             };
             bytes_left = bytes_left.saturating_sub(content.len());

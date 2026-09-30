@@ -349,13 +349,17 @@ fn page_content_inflating_past_the_byte_budget_is_skipped() {
     let page_id = page_of_streams(&mut doc, dictionary! {}, vec![text, bomb, after]);
 
     let _budget = PageBytesBudget::set(200);
-    let (_, counts) = scan_page_content(&doc, page_id, &mut HashSet::new(), &mut HashSet::new());
+    let (state, counts) = scan_page(&doc, page_id, &mut HashSet::new(), &mut HashSet::new());
     assert_eq!(
         counts.text_ops, 1,
         "the stream before the bomb is scanned; the bomb and the stream after it are not"
     );
+    assert!(
+        state.incomplete,
+        "a refused content stream leaves the page's evidence incomplete, so no \
+         shows-only-a-hidden-text-layer verdict can rest on it"
+    );
 }
-
 /// A bound form's Flate content that inflates past the walk's remaining
 /// byte budget is refused before it is held, and no bound form after it
 /// is read — as the executed-form budget refuses — while the forms the
@@ -420,6 +424,7 @@ fn bound_form_inflating_past_the_walk_budget_is_skipped() {
     let mut used_font_ids = HashSet::new();
     let mut font_map = HashMap::new();
     let mut bytes_left = 200usize;
+    let mut truncated = false;
     let counts = scan_xobjects_in_resources(
         &doc,
         &page_resources,
@@ -428,9 +433,14 @@ fn bound_form_inflating_past_the_walk_budget_is_skipped() {
         &mut used_font_ids,
         &mut font_map,
         &mut bytes_left,
+        &mut truncated,
     );
     assert_eq!(
         counts.text_ops, 1,
         "the form before the bomb is read; the bomb and the form after it are not"
+    );
+    assert!(
+        truncated,
+        "the refused form leaves the walk's tallies incomplete, so no claim rests on them"
     );
 }
