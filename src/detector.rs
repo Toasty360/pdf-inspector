@@ -2240,7 +2240,11 @@ pub(crate) fn analyze_page_images(doc: &Document, page_id: ObjectId) -> (bool, u
                                         &mut has_template_image,
                                         TEMPLATE_IMAGE_THRESHOLD,
                                         &mut visited,
-                                        1,
+                                        // Seeded like every other entry point: the
+                                        // pattern's cell is a scope, not one of the
+                                        // form levels the cap counts, so a chain
+                                        // through it gets the same headroom.
+                                        0,
                                     );
                                 }
                             }

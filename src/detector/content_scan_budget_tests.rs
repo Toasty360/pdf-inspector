@@ -511,6 +511,7 @@ fn bound_form_chain_deeper_than_the_depth_cap_stops() {
         let mut used_font_ids = HashSet::new();
         let mut font_map = HashMap::new();
         let mut bytes_left = crate::extractor::content_decode::MAX_PAGE_CONTENT_BYTES;
+        let mut truncated = false;
         let counts = scan_xobjects_in_resources(
             &doc,
             &page_resources,
@@ -520,6 +521,11 @@ fn bound_form_chain_deeper_than_the_depth_cap_stops() {
             &mut font_map,
             0,
             &mut bytes_left,
+            &mut truncated,
+        );
+        assert!(
+            !truncated,
+            "the chain's content is all within the byte budget; only its depth is past the cap"
         );
         assert_eq!(
             counts.text_ops, expect_text_ops,
