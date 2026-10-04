@@ -527,6 +527,39 @@ fn is_body_size_all_bold_line(line: &TextLine, base_size: f32) -> bool {
             .all(|item| item.is_bold && (item.font_size - first.font_size).abs() < 0.5)
 }
 
+/// Lines laid out as rows rather than wrapped prose: a line with a gap of
+/// several ems between two runs (a title and its right-aligned date), or a
+/// gap over an em before a run that starts where a run of the line above or
+/// below starts (a label column and its values). Wrapped prose leaves
+/// neither: its runs are a word space apart and do not line up.
+fn find_row_lines(lines: &[TextLine]) -> HashSet<usize> {
+    // Where each line's runs start after a gap over an em.
+    let gapped_starts = |line: &TextLine, ems: f32| -> Vec<f32> {
+        line.items
+            .windows(2)
+            .filter(|pair| {
+                let gap = pair[1].x - (pair[0].x + pair[0].width);
+                gap > ems * pair[0].font_size.max(pair[1].font_size)
+            })
+            .map(|pair| pair[1].x)
+            .collect()
+    };
+    let starts: Vec<Vec<f32>> = lines.iter().map(|line| gapped_starts(line, 1.0)).collect();
+    let aligned = |i: usize, j: usize| {
+        lines[i].page == lines[j].page
+            && starts[i]
+                .iter()
+                .any(|x| starts[j].iter().any(|y| (x - y).abs() <= 1.0))
+    };
+    (0..lines.len())
+        .filter(|&i| {
+            !gapped_starts(&lines[i], 4.0).is_empty()
+                || (i > 0 && aligned(i, i - 1))
+                || (i + 1 < lines.len() && aligned(i, i + 1))
+        })
+        .collect()
+}
+
 fn is_wrapped_same_style_line(prev: &TextLine, next: &TextLine, para_threshold: f32) -> bool {
     if prev.page != next.page {
         return false;
@@ -801,6 +834,7 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
     // between paragraphs at body font size. Inspired by opendataloader's
     // lookahead in HeadingProcessor (prevNode/nextNode context).
     let isolated_lines = find_isolated_lines(&lines, base_size, para_threshold);
+    let row_lines = find_row_lines(&lines);
     let (wrapped_bold_paragraph_lines, wrapped_quoted_paragraph_lines) =
         find_wrapped_bold_paragraph_lines(&lines, base_size, para_threshold);
 
@@ -1314,6 +1348,15 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
 
         // Regular text - join lines within same paragraph with space
         let cur_dot_leaders = has_dot_leaders(plain_trimmed);
+        // A row (a title and its right-aligned date) starts a paragraph: it
+        // is not a wrap of the prose above it. What follows a row may still
+        // wrap from it, so only another row breaks after one.
+        let is_row = row_lines.contains(&line_idx);
+        if in_paragraph && is_row {
+            output.push_str("\n\n");
+            in_paragraph = false;
+            paragraph_in_wrapped_bold_run = false;
+        }
         if in_paragraph {
             if cur_dot_leaders || prev_had_dot_leaders {
                 output.push('\n');
@@ -1461,6 +1504,7 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
     let para_threshold = compute_paragraph_threshold(&lines, base_size);
 
     let isolated_lines = find_isolated_lines(&lines, base_size, para_threshold);
+    let row_lines = find_row_lines(&lines);
     let (wrapped_bold_paragraph_lines, wrapped_quoted_paragraph_lines) =
         find_wrapped_bold_paragraph_lines(&lines, base_size, para_threshold);
     let sequence_heading_levels = classify_heading_sequences(
@@ -1692,6 +1736,15 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
 
         // Regular text - join lines within same paragraph with space
         let cur_dot_leaders = has_dot_leaders(plain_trimmed);
+        // A row (a title and its right-aligned date) starts a paragraph: it
+        // is not a wrap of the prose above it. What follows a row may still
+        // wrap from it, so only another row breaks after one.
+        let is_row = row_lines.contains(&line_idx);
+        if in_paragraph && is_row {
+            output.push_str("\n\n");
+            in_paragraph = false;
+            paragraph_in_wrapped_bold_run = false;
+        }
         if in_paragraph {
             if cur_dot_leaders || prev_had_dot_leaders {
                 output.push('\n');

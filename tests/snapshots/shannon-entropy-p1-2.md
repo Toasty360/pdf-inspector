@@ -22,9 +22,13 @@ log₂*M* = log₁₀*M*= log₁₀2 = 3:32 log₁₀*M*;
 
 ¹Nyquist, H., “Certain Factors Affecting Telegraph Speed,” *Bell System Technical Journal,* April 1924, p. 324; “Certain Topics in Telegraph Transmission Theory,” *A.I.E.E. Trans.,* v. 47, April 1928, p. 617. ²Hartley, R. V. L., “Transmission of Information,” *Bell System Technical Journal,* July 1928, p. 535.
 
-INFORMATION SOURCE TRANSMITTER RECEIVER DESTINATION
+INFORMATION
 
-SIGNAL RECEIVED SIGNAL MESSAGE MESSAGE
+SOURCE TRANSMITTER RECEIVER DESTINATION
+
+SIGNAL RECEIVED SIGNAL
+
+MESSAGE MESSAGE
 
 NOISE SOURCE
 

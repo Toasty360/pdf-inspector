@@ -16,7 +16,19 @@ CENTER
 
 8 4 ZELL/LURIE REAL ESTATE
 
-**Table I:** Cap rate correlations **Cap Rate Correlation With:*** **BBB Corp** **10-Year Bond Yield S&P Dividend** **Treasury (10-15 yr) Yield** Multifamily 0.187 0.771 0.068 Industrial-0.221 0.748-0.307 CBD Office-0.449 0.694-0.458 Retail-0.181 0.649-02.58
+**Table I:** Cap rate correlations **Cap Rate Correlation With:*** **BBB Corp**
+
+**10-Year Bond Yield S&P Dividend**
+
+**Treasury (10-15 yr) Yield**
+
+Multifamily 0.187 0.771 0.068
+
+Industrial-0.221 0.748-0.307
+
+CBD Office-0.449 0.694-0.458
+
+Retail-0.181 0.649-02.58
 
 * Based on 25 years of data for the 10-yrT & S&P DivYld; and 14 years for BBB.
 **Figure 1:** NCREIF cap rates vs. 10-yearTreasury
@@ -46,7 +58,9 @@ REVIEW 8 5
 
 1982 1986 1990 1994 1998 2002 2006
 
-**Table II:** Correlationsofspreadsbypropertytype **Correlation of Cap Rate Spreads Over Treasury** **Multifamily Industrial CBD Office**
+**Table II:** Correlationsofspreadsbypropertytype **Correlation of Cap Rate Spreads Over Treasury**
+
+**Multifamily Industrial CBD Office**
 
 ||Multifamily|Industrial|CBD Office|
 |---|---|---|---|
@@ -54,7 +68,35 @@ REVIEW 8 5
 |CBDOffice|0.924|||
 |Retail|0.922|0.969|0.964|
 
-more about investing in tax losses than burst, cap rates spreads steadily com- real estate cash streams. When tax laws pressed, recently falling to approximately dramatically changed in 1986, cap rate zero. And if NOI cap rate spreads are spreads rose, though they generally roughly zero, cash flow cap rate spreads remained negative due to the availability (after reserves for tenant improvements, of excess leverage through 1990 and pro-leasing commissions, and capital expendi- jections of strong cash flow growth, in tures) are well below zero. spite of weak fundamentals. This compression of cap rates and cap Throughout the first two-thirds of the rate spreads over the past five years has 1990s, spreads substantially widened as generated enormous wealth for real estate capital abandoned real estate. Spreads fur-owners. In fact, the combination of cheap ther widened in the latter part of the debt and cap rate compression covered a 1990s, as investors scorned cash flow dur-multitude of property underwriting ing the tech bubble and treasury rates errors made during the past five years, as drifted downward. As the tech bubble neither cap rate compression nor narrow-
+more about investing in tax losses than burst, cap rates spreads steadily com-
+
+real estate cash streams. When tax laws pressed, recently falling to approximately
+
+dramatically changed in 1986, cap rate zero. And if NOI cap rate spreads are
+
+spreads rose, though they generally roughly zero, cash flow cap rate spreads
+
+remained negative due to the availability (after reserves for tenant improvements,
+
+of excess leverage through 1990 and pro-leasing commissions, and capital expendi-
+
+jections of strong cash flow growth, in tures) are well below zero.
+
+spite of weak fundamentals. This compression of cap rates and cap
+
+Throughout the first two-thirds of the rate spreads over the past five years has
+
+1990s, spreads substantially widened as generated enormous wealth for real estate
+
+capital abandoned real estate. Spreads fur-owners. In fact, the combination of cheap
+
+ther widened in the latter part of the debt and cap rate compression covered a
+
+1990s, as investors scorned cash flow dur-multitude of property underwriting
+
+ing the tech bubble and treasury rates errors made during the past five years, as
+
+drifted downward. As the tech bubble neither cap rate compression nor narrow-
 
 8 6 ZELL/LURIE REAL ESTATE CENTER
 
