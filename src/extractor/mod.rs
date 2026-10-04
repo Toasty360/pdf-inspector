@@ -3138,31 +3138,23 @@ mod tests {
     #[test]
     fn bold_numeric_fragments_keep_line_assembly_spacing() {
         for (parts, gap, expected) in [
-            (
-                vec![("0", false), (".", true), ("86", false)],
-                1.2,
-                "0**.**86",
-            ),
+            (vec![("0", false), (".", true), ("86", false)], 1.2, "0.86"),
             (vec![("0.", true), ("86", false)], 1.2, "**0.**86"),
-            (vec![(".", true), ("42", false)], 1.2, "**.**42"),
+            (vec![(".", true), ("42", false)], 1.2, ".42"),
             (
                 vec![("12 ", false), (".", true), ("55", false)],
                 1.2,
-                "12 **.**55",
+                "12 .55",
             ),
             (
                 vec![("12", false), (" .", true), ("55", false)],
                 1.2,
-                "12 **.**55",
+                "12 .55",
             ),
             (vec![("1", false), ("23", true)], 1.2, "1**23**"),
             (vec![("12", true), ("%", false)], 1.2, "**12**%"),
-            (vec![("+", true), ("12", false)], 1.2, "**+**12"),
-            (
-                vec![("1", false), (",", true), ("25", false)],
-                1.2,
-                "1**,**25",
-            ),
+            (vec![("+", true), ("12", false)], 1.2, "+12"),
+            (vec![("1", false), (",", true), ("25", false)], 1.2, "1,25"),
             (vec![("Done.", true), ("2", false)], 1.2, "**Done.** 2"),
             (vec![("0. ", true), ("86", false)], 1.2, "**0.** 86"),
             (vec![("0.", true), ("86", false)], 4.8, "**0.** 86"),
