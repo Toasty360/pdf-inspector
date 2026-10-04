@@ -1264,7 +1264,7 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
                 // 2. Y gap is not too large (max ~5 line heights)
                 // 3. Not a new list item
                 let x_ok = curr_x >= list_x - 5.0 && curr_x <= list_x + 50.0;
-                let y_ok = y_gap < base_size * 7.0;
+                let y_ok = y_gap < base_size * 7.0 && y_gap <= para_threshold;
                 x_ok && y_ok && !is_list_item(plain_trimmed) && !has_dot_leaders(plain_trimmed)
             } else {
                 false
@@ -1280,6 +1280,13 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
                 output.push('\n');
                 continue;
             } else {
+                // Past a paragraph gap the list is over: close it with a blank
+                // line, or GFM reads this line as a lazy continuation of the
+                // last item. Tighter gaps keep the lazy join, which is what
+                // reads right for wrapped text after a falsely detected item.
+                if is_para_break {
+                    output.push('\n');
+                }
                 in_list = false;
                 last_list_x = None;
             }
@@ -1660,7 +1667,7 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
                 // 2. Y gap is not too large (max ~5 line heights)
                 // 3. Not a new list item
                 let x_ok = curr_x >= list_x - 5.0 && curr_x <= list_x + 50.0;
-                let y_ok = y_gap < base_size * 7.0;
+                let y_ok = y_gap < base_size * 7.0 && y_gap <= para_threshold;
                 x_ok && y_ok && !is_list_item(plain_trimmed) && !has_dot_leaders(plain_trimmed)
             } else {
                 false
@@ -1676,6 +1683,13 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
                 output.push('\n');
                 continue;
             } else {
+                // Past a paragraph gap the list is over: close it with a blank
+                // line, or GFM reads this line as a lazy continuation of the
+                // last item. Tighter gaps keep the lazy join, which is what
+                // reads right for wrapped text after a falsely detected item.
+                if is_para_break {
+                    output.push('\n');
+                }
                 in_list = false;
                 last_list_x = None;
             }
@@ -2014,6 +2028,58 @@ mod tests {
         assert!(
             !md.contains("- to a second line here."),
             "continuation line should not get its own bullet: {md}"
+        );
+    }
+
+    #[test]
+    fn test_list_item_ends_at_paragraph_gap() {
+        // Regression: a resume's next job title sits a paragraph gap below
+        // the last bullet, at nearly the bullet's x. The continuation check
+        // allowed gaps up to 7x the body size, so it joined the item.
+        // Wrapped lines at normal spacing must still join, whether they sit
+        // at the text's hanging indent or flush under the bullet.
+        let make = |text: &str, x: f32, y: f32| {
+            let mut item = make_item(text, 1, None);
+            item.x = x;
+            item.y = y;
+            item
+        };
+        let lines = vec![
+            make_line(vec![
+                make("•", 36.2, 400.0),
+                make("Hanging item text that wraps", 45.5, 399.3),
+            ]),
+            make_line(vec![make("at the hanging indent.", 45.5, 385.8)]),
+            make_line(vec![
+                make("•", 36.2, 371.6),
+                make("Flush item text that wraps", 45.5, 370.9),
+            ]),
+            make_line(vec![make("back under the bullet.", 36.2, 357.4)]),
+            make_line(vec![make("Software Developer (Java)", 38.4, 334.0)]),
+            make_line(vec![make("Enterprise Tech Solutions", 38.4, 320.4)]),
+            make_line(vec![
+                make("•", 36.2, 306.0),
+                make("Developed core microservices using Java.", 45.5, 305.3),
+            ]),
+        ];
+
+        let md = to_markdown_from_lines_with_tables_and_images(
+            lines,
+            MarkdownOptions::default(),
+            HashMap::new(),
+            HashMap::new(),
+            &HashMap::new(),
+            &std::collections::HashSet::new(),
+            None,
+        );
+
+        assert!(
+            md.contains("- Hanging item text that wraps at the hanging indent.\n"),
+            "hanging wrapped line should join the item: {md:?}"
+        );
+        assert!(
+            md.contains("- Flush item text that wraps back under the bullet.\n\nSoftware Developer (Java)"),
+            "flush wrapped line should join the item, and the job title after a paragraph gap should start a new block: {md:?}"
         );
     }
 
