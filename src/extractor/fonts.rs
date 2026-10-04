@@ -1951,9 +1951,11 @@ pub(crate) fn parse_encoding_dictionary(
                 // What the name stands for: one character, or the letters
                 // of a ligature named by its components (`f_t`) or by a
                 // `uni` sequence.
-                let mapped = glyph_name_to_string(&glyph_name).or_else(|| {
-                    private_glyph_to_char(&glyph_name, base_font_name).map(String::from)
-                });
+                let mapped = glyph_name_to_string(&glyph_name)
+                    .or_else(|| {
+                        private_glyph_to_char(&glyph_name, base_font_name).map(String::from)
+                    })
+                    .or_else(|| is_icon_font(base_font_name).then(String::new));
                 let mut chars = mapped.as_deref().unwrap_or_default().chars();
                 let mapped_char = match (chars.next(), chars.next()) {
                     (Some(ch), None) => Some(ch),
@@ -2043,6 +2045,14 @@ fn private_glyph_to_char(glyph_name: &str, base_font_name: Option<&str>) -> Opti
     } else {
         None
     }
+}
+
+/// Icon fonts name their glyphs after pictures (`envelope`, `phone-alt`,
+/// `linkedin`) that stand for no text. Without this their codes read as the
+/// single-byte characters they are, so a resume's contact icons come out as
+/// stray "+", "#" or "ï". An icon reads as nothing instead.
+fn is_icon_font(base_font_name: Option<&str>) -> bool {
+    base_font_name.is_some_and(|name| strip_subset_prefix(name).starts_with("FontAwesome"))
 }
 
 fn strip_subset_prefix(font_name: &str) -> &str {
@@ -5371,6 +5381,29 @@ mod tests {
         assert_eq!(result.map.get(&0x88u8), Some(&'\u{FB00}'));
         assert_eq!(result.map.get(&0x89u8), Some(&'\u{FB01}'));
         assert_eq!(result.map.get(&0xADu8), Some(&'\u{FB02}'));
+    }
+
+    #[test]
+    fn icon_font_glyphs_read_as_nothing() {
+        // LaTeX's fontawesome5 names its glyphs after pictures, with no
+        // ToUnicode: read as single bytes, a resume's contact icons came out
+        // as "+", "#" and "ï".
+        let doc = Document::new();
+        let enc = lopdf::dictionary! {
+            "Type" => "Encoding",
+            "Differences" => vec![
+                35.into(), Object::Name(b"envelope".to_vec()),
+                239.into(), Object::Name(b"linkedin".to_vec()),
+            ],
+        };
+        let icons = parse_encoding_dictionary(&doc, &enc, Some("EALUNH+FontAwesome5Free-Solid"))
+            .expect("icon encoding parsed");
+        assert_eq!(icons.sequences.get(&35).map(String::as_str), Some(""));
+        assert_eq!(icons.sequences.get(&239).map(String::as_str), Some(""));
+        // Other fonts keep the existing fallback for names they cannot read.
+        let other = parse_encoding_dictionary(&doc, &enc, Some("ABCDEF+OtherFont"))
+            .expect("encoding parsed");
+        assert!(other.sequences.is_empty());
     }
 
     #[test]
