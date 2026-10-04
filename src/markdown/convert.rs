@@ -838,6 +838,7 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
     let mut current_page = 0u32;
     let mut prev_y = f32::MAX;
     let mut prev_x = 0.0f32;
+    let mut prev_font_size = 0.0f32;
     let mut in_list = false;
     let mut in_paragraph = false;
     let mut last_list_x: Option<f32> = None;
@@ -1013,8 +1014,19 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
         // Don't immediately end list on paragraph break
         // Let the continuation check below decide if we're still in a list
         let (prior_y, prior_x) = (prev_y, prev_x);
+        // A line that carries on the paragraph above it — line spacing, the
+        // same size, the same left edge (or the margin under an indented
+        // first line) — is that paragraph's text, whatever its size says:
+        // a size-based heading stands out from the text above it.
+        let line_font_size = line.items.first().map_or(0.0, |i| i.font_size);
+        let continues_paragraph = in_paragraph
+            && !is_para_break
+            && (line_font_size - prev_font_size).abs() <= 0.5
+            && line_x <= prev_x + 3.0
+            && line_x >= prev_x - 40.0;
         prev_y = line.y;
         prev_x = line_x;
+        prev_font_size = line_font_size;
 
         // Get text with optional bold/italic formatting
         let text = line.text_with_formatting(
@@ -1128,6 +1140,7 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
             && !wrapped_quoted_paragraph_lines.contains(&line_idx)
             && !is_code_line
             && !looks_like_list_continuation
+            && !continues_paragraph
             && plain_trimmed.len() > 3
             && plain_trimmed.split_whitespace().count() <= 15
             && !starts_with_bullet_marker(plain_trimmed)
@@ -2080,6 +2093,54 @@ mod tests {
         assert!(
             md.contains("- Flush item text that wraps back under the bullet.\n\nSoftware Developer (Java)"),
             "flush wrapped line should join the item, and the job title after a paragraph gap should start a new block: {md:?}"
+        );
+    }
+
+    #[test]
+    fn test_paragraph_continuation_is_not_a_size_heading() {
+        // Regression: a report set mostly in 9pt has an 11pt prose section.
+        // Its short second line passed the size test for a heading and split
+        // the paragraph; a line carrying on the paragraph above it at line
+        // spacing, size and indent is that paragraph's text.
+        let make = |text: &str, size: f32, y: f32| {
+            let mut item = make_item(text, 1, None);
+            item.x = 72.0;
+            item.y = y;
+            item.font_size = size;
+            item.height = size;
+            item
+        };
+        let mut lines: Vec<TextLine> = (0..8)
+            .map(|i| {
+                let body =
+                    "Body text set in the report's usual nine point size for tables and notes.";
+                make_line(vec![make(body, 9.0, 700.0 - 11.0 * i as f32)])
+            })
+            .collect();
+        lines.push(make_line(vec![make(
+            "An option to faculty will be provided to avail extraordinary leave without pay for up to 2",
+            11.04,
+            580.0,
+        )]));
+        lines.push(make_line(vec![make(
+            "years at a time subject to:",
+            11.04,
+            567.4,
+        )]));
+
+        let md = to_markdown_from_lines_with_tables_and_images(
+            lines,
+            MarkdownOptions::default(),
+            HashMap::new(),
+            HashMap::new(),
+            &HashMap::new(),
+            &std::collections::HashSet::new(),
+            None,
+        );
+
+        assert!(
+            md.contains("for up to 2 years at a time subject to:"),
+            "the short line should continue its paragraph: {md:?}"
         );
     }
 
