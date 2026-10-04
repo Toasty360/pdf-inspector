@@ -1013,14 +1013,16 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
         }
         // Don't immediately end list on paragraph break
         // Let the continuation check below decide if we're still in a list
-        let (prior_y, prior_x) = (prev_y, prev_x);
+        let (prior_y, prior_x, prior_font_size) = (prev_y, prev_x, prev_font_size);
         // A line that carries on the paragraph above it — line spacing, the
         // same size, the same left edge (or the margin under an indented
         // first line) — is that paragraph's text, whatever its size says:
-        // a size-based heading stands out from the text above it.
+        // a size-based heading stands out from the text above it. A bold
+        // line keeps its own heading signal.
         let line_font_size = line.items.first().map_or(0.0, |i| i.font_size);
         let continues_paragraph = in_paragraph
             && !is_para_break
+            && !line_all_bold
             && (line_font_size - prev_font_size).abs() <= 0.5
             && line_x <= prev_x + 3.0
             && line_x >= prev_x - 40.0;
@@ -1078,6 +1080,7 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
             // band from the text line, not from the tail.
             prev_y = prior_y;
             prev_x = prior_x;
+            prev_font_size = prior_font_size;
             continue;
         }
 

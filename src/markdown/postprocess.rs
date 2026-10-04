@@ -363,10 +363,12 @@ fn dehyphenate_line_breaks(text: &str) -> String {
 /// The converter writes no rules of its own, so such a line is the
 /// document's text — a "---" table cell, a "* * * * *" omission mark.
 fn escape_rule_lines(text: &mut String) {
+    // Up to three spaces of indent: a tab or a fourth space makes a code line.
     let is_rule = |line: &str| {
-        let indent = line.len() - line.trim_start().len();
+        let indent = line.len() - line.trim_start_matches(' ').len();
         let marks: Vec<char> = line.chars().filter(|c| !c.is_whitespace()).collect();
         indent <= 3
+            && !line[indent..].starts_with('\t')
             && marks.first().is_some_and(|&first| {
                 marks.iter().all(|&c| c == first)
                     && (first == '=' || (matches!(first, '-' | '*' | '_') && marks.len() >= 3))
@@ -382,7 +384,12 @@ fn escape_rule_lines(text: &mut String) {
             in_code = !in_code;
         }
         if !in_code && is_rule(line.trim_end_matches('\n')) {
-            let indent = line.len() - line.trim_start().len();
+            // A list item of dashes ("- --") keeps its marker; its text is
+            // what gets escaped.
+            let mut indent = line.len() - line.trim_start().len();
+            if line[indent..].starts_with("- ") {
+                indent += 2;
+            }
             out.push_str(&line[..indent]);
             out.push('\\');
             out.push_str(&line[indent..]);
@@ -836,11 +843,11 @@ mod tests {
     #[test]
     fn test_escape_rule_lines() {
         let mut text =
-            "7.62\n\n---\n\n* * * * *\nTitle\n===\n|---|---|\n```\n---\n```\n--\n".to_string();
+            "7.62\n\n---\n\n* * * * *\nTitle\n===\n|---|---|\n```\n---\n```\n--\n- --\n\t---\n    ---\n".to_string();
         escape_rule_lines(&mut text);
         assert_eq!(
             text,
-            "7.62\n\n\\---\n\n\\* * * * *\nTitle\n\\===\n|---|---|\n```\n---\n```\n--\n"
+            "7.62\n\n\\---\n\n\\* * * * *\nTitle\n\\===\n|---|---|\n```\n---\n```\n--\n- \\--\n\t---\n    ---\n"
         );
     }
 
